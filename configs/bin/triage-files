@@ -1,0 +1,255 @@
+#!/usr/bin/env python3
+"""Auto-sort Downloads and Screenshots using deterministic rules + Gemini Decisions API."""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import mimetypes
+import os
+import shutil
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _rig_common import ctext  # noqa: E402
+
+DEFAULT_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/decisions"
+MAX_MULTIMODAL_BYTES = 50 * 1024 * 1024
+PARTIAL_SUFFIXES = {".part", ".crdownload", ".tmp", ".download"}
+
+EXTENSION_BUCKETS = {
+    ".iso": "installers",
+    ".img": "installers",
+    ".appimage": "installers",
+    ".exe": "installers",
+    ".msi": "installers",
+    ".deb": "installers",
+    ".rpm": "installers",
+    ".zst": "archives",
+    ".zip": "archives",
+    ".7z": "archives",
+    ".rar": "archives",
+    ".tar": "archives",
+    ".gz": "archives",
+    ".xz": "archives",
+    ".bz2": "archives",
+}
+
+DECIDE_BUCKETS = ["receipts", "work", "study", "wallpapers", "memes", "reference", "unsorted"]
+MULTIMODAL_MIMES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".pdf": "application/pdf",
+}
+TEXT_EXTS = {".txt", ".md", ".csv", ".json", ".log"}
+
+
+def _unique_dest(dest_dir: Path, filename: str) -> Path:
+    candidate = dest_dir / filename
+    if not candidate.exists():
+        return candidate
+    stem = Path(filename).stem
+    suffix = Path(filename).suffix
+    idx = 1
+    while True:
+        alt = dest_dir / f"{stem}_{idx}{suffix}"
+        if not alt.exists():
+            return alt
+        idx += 1
+
+
+def _call_decide_for_file(path: Path, api_key: str) -> tuple[str, float]:
+    ext = path.suffix.lower()
+    size = path.stat().st_size
+    if size > MAX_MULTIMODAL_BYTES:
+        return "unsorted", 0.0
+
+    mime = MULTIMODAL_MIMES.get(ext) or mimetypes.guess_type(str(path))[0]
+    if ext in MULTIMODAL_MIMES and mime:
+        b64 = base64.b64encode(path.read_bytes()).decode("ascii")
+        input_field: object = [
+            {"text": f"Filename: {path.name}"},
+            {"inlineData": {"mimeType": mime, "data": b64}},
+        ]
+    elif ext in TEXT_EXTS:
+        snippet = path.read_text(encoding="utf-8", errors="replace")[:2000]
+        input_field = f"Filename: {path.name}\n\n{snippet}"
+    else:
+        return "unsorted", 0.0
+
+    payload = json.dumps(
+        {
+            "model": "gemini-decision-1",
+            "input": input_field,
+            "instructions": (
+                "Classify this downloaded file or screenshot into one bucket: "
+                "receipts (invoices/bills/orders), work (code/diagrams/work docs), "
+                "study (notes/papers/tutorials), wallpapers (desktop backgrounds), "
+                "memes (humor/social), reference (manuals/cheatsheets/articles), "
+                "or unsorted (unclear/ambiguous)."
+            ),
+            "choices": DECIDE_BUCKETS,
+        }
+    ).encode("utf-8")
+
+    req = urllib.request.Request(
+        f"{DEFAULT_ENDPOINT}?key={api_key}",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=20.0) as resp:
+        body = json.loads(resp.read().decode("utf-8", errors="replace"))
+
+    verdict = (body.get("answers") or {}).get("verdict") or body
+    decision = str(verdict.get("choice") or verdict.get("decision") or "unsorted").strip().lower()
+    raw_conf = verdict.get("confidence", verdict.get("score", 0.0))
+    try:
+        conf = float(raw_conf)
+    except (TypeError, ValueError):
+        conf = 0.0
+    return decision, conf
+
+
+def triage_directory(
+    directory: Path,
+    *,
+    min_age: int,
+    min_confidence: float,
+    dry_run: bool,
+    api_key: str,
+) -> list[str]:
+    if not directory.is_dir():
+        return []
+
+    now = time.time()
+    actions: list[str] = []
+    for entry in sorted(directory.iterdir(), key=lambda p: p.name.lower()):
+        if not entry.is_file() or entry.name.startswith("."):
+            continue
+        if entry.suffix.lower() in PARTIAL_SUFFIXES:
+            continue
+        try:
+            age = now - entry.stat().st_mtime
+        except OSError:
+            continue
+        if age < min_age:
+            continue
+
+        ext = entry.suffix.lower()
+        bucket = EXTENSION_BUCKETS.get(ext)
+        reason = "extension"
+        conf = 1.0
+
+        if not bucket:
+            if not api_key:
+                continue
+            try:
+                decision, conf = _call_decide_for_file(entry, api_key)
+            except (OSError, urllib.error.URLError, ValueError) as exc:
+                actions.append(f"[WARN] {entry.name}: decide failed ({exc})")
+                continue
+            if decision == "unsorted" or decision not in DECIDE_BUCKETS or conf < min_confidence:
+                actions.append(f"[SKIP] {entry.name}: {decision} (conf={conf:.2f} < {min_confidence:.2f})")
+                continue
+            bucket = decision
+            reason = f"decide conf={conf:.2f}"
+
+        dest_dir = directory / bucket
+        dest = _unique_dest(dest_dir, entry.name)
+        if dry_run:
+            actions.append(f"[DRY-RUN] {entry.name} -> {bucket}/{dest.name} ({reason})")
+        else:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(entry), str(dest))
+            actions.append(f"[MOVED] {entry.name} -> {bucket}/{dest.name} ({reason})")
+    return actions
+
+
+def install_systemd_timer() -> int:
+    unit_dir = Path.home() / ".config" / "systemd" / "user"
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    script_path = Path(__file__).resolve()
+    py = sys.executable
+
+    service_text = (
+        "[Unit]\n"
+        "Description=Triage Downloads and Screenshots via rig decide\n\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        f"EnvironmentFile=-%h/.config/rig/triage.env\n"
+        f"ExecStart={py} {script_path}\n"
+    )
+    timer_text = (
+        "[Unit]\n"
+        "Description=Run rig file triage every 10 minutes\n\n"
+        "[Timer]\n"
+        "OnBootSec=2min\n"
+        "OnUnitActiveSec=10min\n"
+        "Persistent=true\n\n"
+        "[Install]\n"
+        "WantedBy=timers.target\n"
+    )
+    (unit_dir / "rig-triage.service").write_text(service_text, encoding="utf-8")
+    (unit_dir / "rig-triage.timer").write_text(timer_text, encoding="utf-8")
+    print(ctext(f"[APPLIED] Wrote systemd user units in {unit_dir}", "green"))
+    if shutil.which("systemctl"):
+        subprocess.run(["systemctl", "--user", "daemon-reload"], check=False)
+        subprocess.run(["systemctl", "--user", "enable", "--now", "rig-triage.timer"], check=False)
+        print(ctext("[APPLIED] Enabled and started rig-triage.timer", "green"))
+        print(ctext("Note: put GEMINI_API_KEY=... in ~/.config/rig/triage.env for timer runs.", "darkgray"))
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="triage-files",
+        description="Auto-sort Downloads and Screenshots using extension rules + Gemini Decisions API.",
+    )
+    parser.add_argument("--dir", action="append", dest="dirs", help="Directory to triage (repeatable; defaults to ~/Downloads and ~/Pictures/Screenshots)")
+    parser.add_argument("--min-age", type=int, default=60, help="Skip files modified more recently than N seconds (default: 60)")
+    parser.add_argument("--min-confidence", type=float, default=0.85, help="Minimum decide confidence to move a file (default: 0.85)")
+    parser.add_argument("--dry-run", action="store_true", help="Preview moves without modifying files")
+    parser.add_argument("--install-timer", action="store_true", help="Install and enable systemd --user timer (rig-triage.timer)")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.install_timer:
+        return install_systemd_timer()
+
+    dirs = [Path(d).expanduser() for d in args.dirs] if args.dirs else [
+        Path.home() / "Downloads",
+        Path.home() / "Pictures" / "Screenshots",
+    ]
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        print(ctext("[INFO] GEMINI_API_KEY not set; running extension-only routing.", "yellow"))
+
+    total = 0
+    for d in dirs:
+        for line in triage_directory(
+            d,
+            min_age=args.min_age,
+            min_confidence=args.min_confidence,
+            dry_run=args.dry_run,
+            api_key=api_key,
+        ):
+            print(line)
+            total += 1
+    if total == 0:
+        print("No eligible files to triage.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

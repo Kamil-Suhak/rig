@@ -180,7 +180,9 @@ def build_prompt_text(
     else:
         prompt_question = "Explain or address the terminal command and output shown in context above."
 
-    parts = [preamble.strip()]
+    parts: list[str] = []
+    if preamble and preamble.strip():
+        parts.append(preamble.strip())
 
     if include_ctx:
         blocks = convert_to_terminal_blocks(read_terminal_buffer(), fallback_command=fallback_command)
@@ -261,7 +263,15 @@ def remove_agy_conversation(cli_dir: Path, conv_ids: set[str]) -> None:
                 con.close()
 
 
-def stream_ask_process(executable: str, args: list[str], label: str, stream_json: bool) -> tuple[int, str | None]:
+def stream_ask_process(
+    executable: str,
+    args: list[str],
+    label: str,
+    stream_json: bool,
+    *,
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+) -> tuple[int, str | None]:
     """Launch ask backend CLI, show spinner until first output, and stream assistant response."""
     interactive_out = sys.stdout.isatty()
     animate = sys.stderr.isatty() and should_use_color(sys.stderr)
@@ -276,6 +286,8 @@ def stream_ask_process(executable: str, args: list[str], label: str, stream_json
             encoding="utf-8",
             errors="replace",
             bufsize=1,
+            cwd=cwd,
+            env=env,
         )
     except OSError as exc:
         print(_ce(sys.stderr, f"\n✖ {exe_name}: failed to start ({exc})\n", "red"), file=sys.stderr)
@@ -551,9 +563,155 @@ def cmd_build_prompt(args: argparse.Namespace) -> int:
     return 0
 
 
+def ensure_ask_home(ask_home: Path, real_home: Path) -> None:
+    """Create minimal isolated ask-home with dedicated ASK.md and settings.json."""
+    ask_gemini = ask_home / ".gemini"
+    ask_gemini.mkdir(parents=True, exist_ok=True)
+
+    ask_md = Path(__file__).resolve().parent.parent / "gemini" / "ASK.md"
+    dst_gemini_md = ask_gemini / "GEMINI.md"
+    if ask_md.is_file():
+        if dst_gemini_md.is_symlink() and dst_gemini_md.resolve() != ask_md.resolve():
+            dst_gemini_md.unlink()
+        if not dst_gemini_md.exists() and not dst_gemini_md.is_symlink():
+            try:
+                dst_gemini_md.symlink_to(ask_md)
+            except OSError:
+                pass
+
+    src_settings = real_home / ".gemini" / "settings.json"
+    dst_settings = ask_gemini / "settings.json"
+    if src_settings.exists() and not dst_settings.exists() and not dst_settings.is_symlink():
+        try:
+            dst_settings.symlink_to(src_settings)
+        except OSError:
+            pass
+
+
+def _decide_keep_or_prune(prompt_preview: str) -> str:
+    """Use Gemini Decisions API to score whether an ask-home thread is worth keeping."""
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key or not prompt_preview.strip():
+        return "prune"
+    import urllib.error
+    import urllib.request
+
+    payload = json.dumps(
+        {
+            "model": "gemini-decision-1",
+            "input": prompt_preview[:1000],
+            "instructions": (
+                "Decide whether this Q&A thread has lasting reference value ('keep') "
+                "or is a trivial one-off syntax/typo/throwaway question ('prune')."
+            ),
+            "choices": ["keep", "prune"],
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        f"https://generativelanguage.googleapis.com/v1beta/decisions?key={api_key}",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            body = json.loads(resp.read().decode("utf-8", errors="replace"))
+        verdict = (body.get("answers") or {}).get("verdict") or body
+        choice = str(verdict.get("choice") or verdict.get("decision") or "prune").strip().lower()
+        return choice if choice in ("keep", "prune") else "prune"
+    except (OSError, urllib.error.URLError, ValueError):
+        return "prune"
+
+
+def prune_ask_home(ask_home: Path, *, max_keep: int = 15) -> None:
+    """Prune oldest ask-home conversations above max_keep using decide (fail-open to FIFO)."""
+    cli_dir = ask_home / ".gemini" / "antigravity-cli"
+    conv_dir = cli_dir / "conversations"
+    if not conv_dir.is_dir():
+        return
+    dbs = sorted(conv_dir.glob("*.db"), key=lambda p: p.stat().st_mtime)
+    if len(dbs) <= max_keep:
+        return
+
+    index_path = ask_home / "index.json"
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.is_file() else {}
+    except (OSError, ValueError):
+        index = {}
+
+    to_remove: set[str] = set()
+    excess = len(dbs) - max_keep
+    for db_path in dbs:
+        if len(to_remove) >= excess:
+            break
+        cid = db_path.stem
+        meta = index.get(cid) or {}
+        if meta.get("scored") == "keep" and len(dbs) - len(to_remove) <= max_keep * 2:
+            continue
+        verdict = _decide_keep_or_prune(str(meta.get("preview", "")))
+        if verdict == "keep" and len(dbs) - len(to_remove) <= max_keep * 2:
+            meta["scored"] = "keep"
+            index[cid] = meta
+        else:
+            to_remove.add(cid)
+            index.pop(cid, None)
+
+    if to_remove:
+        remove_agy_conversation(cli_dir, to_remove)
+    try:
+        index_path.write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
 def cmd_run(args: argparse.Namespace) -> int:
+    if args.reply and args.local:
+        print(_ce(sys.stderr, "✖ ask: cannot combine -r/--reply with --local; -r inherits the conversation's original directory.", "red"), file=sys.stderr)
+        return 2
+    if args.continue_interactive and (args.local or args.reply):
+        print(_ce(sys.stderr, "✖ ask: cannot combine -c/--continue with --local or -r/--reply.", "red"), file=sys.stderr)
+        return 2
+
+    real_home = Path.home()
+    use_ask_home = args.engine == "agy" and not os.environ.get("RIG_AGY_CLI_DIR") and not args.keep_history
+    ask_home = Path(os.environ.get("RIG_ASK_HOME") or (real_home / ".local" / "share" / "ask-home")).expanduser()
+
+    default_bin = "agy" if args.engine == "agy" else "copilot"
+    exe = args.executable or os.environ.get("RIG_ASK_EXECUTABLE") or shutil.which(default_bin)
+    if not exe:
+        print(_ce(sys.stderr, f"✖ ask: '{default_bin}' CLI not found in PATH.", "red"), file=sys.stderr)
+        return 1
+
+    if args.continue_interactive:
+        if args.engine != "agy":
+            print(_ce(sys.stderr, "✖ ask: -c/--continue is only supported with the 'agy' engine.", "red"), file=sys.stderr)
+            return 2
+        ensure_ask_home(ask_home, real_home)
+        last_file = ask_home / "last.json"
+        if not last_file.is_file():
+            print(_ce(sys.stderr, "✖ ask: no previous 'ask' conversation found to continue.", "red"), file=sys.stderr)
+            return 1
+        try:
+            last_meta = json.loads(last_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            last_meta = {}
+        last_id = str(last_meta.get("id") or "").strip()
+        if not last_id:
+            print(_ce(sys.stderr, "✖ ask: last conversation ID is missing.", "red"), file=sys.stderr)
+            return 1
+        saved_cwd = str(last_meta.get("cwd") or ask_home)
+        target_cwd = saved_cwd if Path(saved_cwd).is_dir() else str(ask_home)
+        isolated_env = dict(os.environ)
+        isolated_env["HOME"] = str(ask_home)
+        return subprocess.run([exe, "--conversation", last_id], cwd=target_cwd, env=isolated_env, check=False).returncode
+
     piped = sys.stdin.read() if not sys.stdin.isatty() else ""
-    preamble = args.preamble or (DEFAULT_AGY_PREAMBLE if args.engine == "agy" else DEFAULT_COPILOT_PREAMBLE)
+    if args.preamble is not None:
+        preamble = args.preamble
+    elif use_ask_home:
+        preamble = ""
+    else:
+        preamble = DEFAULT_AGY_PREAMBLE if args.engine == "agy" else DEFAULT_COPILOT_PREAMBLE
     try:
         full_prompt = build_prompt_text(
             args.query,
@@ -567,43 +725,85 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 2
 
     if not full_prompt:
-        print(_ce(sys.stderr, "Usage: ask [--ctx [<n>|~<n>|~<a>..<b>]] [--high] [--keep-history] <question>", "yellow"), file=sys.stderr)
-        return 1
-
-    default_bin = "agy" if args.engine == "agy" else "copilot"
-    exe = args.executable or os.environ.get("RIG_ASK_EXECUTABLE") or shutil.which(default_bin)
-    if not exe:
-        print(_ce(sys.stderr, f"✖ ask: '{default_bin}' CLI not found in PATH.", "red"), file=sys.stderr)
+        print(_ce(sys.stderr, "Usage: ask [--ctx [<n>|~<n>|~<a>..<b>]] [--high] [--local] [-r] [-c] [--keep-history] <question>", "yellow"), file=sys.stderr)
         return 1
 
     if args.engine == "copilot":
         code, _ = stream_ask_process(exe, ["-p", full_prompt], "copilot", stream_json=False)
         return code
 
-    cli_dir = Path(os.environ.get("RIG_AGY_CLI_DIR") or (Path.home() / ".gemini" / "antigravity-cli")).expanduser()
-    conv_dir = cli_dir / "conversations"
-    brain_dir = cli_dir / "brain"
-    before_convs = {p.stem for p in conv_dir.glob("*.db")} if conv_dir.is_dir() else set()
-    before_brain = {p.name for p in brain_dir.iterdir() if p.is_dir()} if brain_dir.is_dir() else set()
-
     model = "gemini-4-hydrogen-high" if args.high else "gemini-4-hydrogen-low"
+
+    # Preserve legacy RIG_AGY_CLI_DIR test mode or explicit --keep-history in main ~/.gemini/antigravity-cli
+    if not use_ask_home:
+        cli_dir = Path(os.environ.get("RIG_AGY_CLI_DIR") or (real_home / ".gemini" / "antigravity-cli")).expanduser()
+        conv_dir = cli_dir / "conversations"
+        brain_dir = cli_dir / "brain"
+        before_convs = {p.stem for p in conv_dir.glob("*.db")} if conv_dir.is_dir() else set()
+        before_brain = {p.name for p in brain_dir.iterdir() if p.is_dir()} if brain_dir.is_dir() else set()
+        code, conv_id = stream_ask_process(
+            exe,
+            ["--model", model, "--output-format", "stream-json", "-p", full_prompt],
+            model,
+            stream_json=True,
+        )
+        if not args.keep_history:
+            time.sleep(0.05)
+            new_ids: set[str] = set()
+            if conv_id:
+                new_ids.add(conv_id)
+            if conv_dir.is_dir():
+                new_ids.update({p.stem for p in conv_dir.glob("*.db")} - before_convs)
+            if brain_dir.is_dir():
+                new_ids.update({p.name for p in brain_dir.iterdir() if p.is_dir()} - before_brain)
+            remove_agy_conversation(cli_dir, new_ids)
+        return code
+
+    ensure_ask_home(ask_home, real_home)
+    last_file = ask_home / "last.json"
+
+    agy_args = ["--disable-slash-commands", "--model", model, "--output-format", "stream-json", "-p", full_prompt]
+    if args.reply:
+        if not last_file.is_file():
+            print(_ce(sys.stderr, "✖ ask: no previous 'ask' conversation found to resume.", "red"), file=sys.stderr)
+            return 1
+        try:
+            last_meta = json.loads(last_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            last_meta = {}
+        last_id = str(last_meta.get("id") or "").strip()
+        if not last_id:
+            print(_ce(sys.stderr, "✖ ask: last conversation ID is missing.", "red"), file=sys.stderr)
+            return 1
+        saved_cwd = str(last_meta.get("cwd") or ask_home)
+        target_cwd = saved_cwd if Path(saved_cwd).is_dir() else str(ask_home)
+        agy_args = ["--conversation", last_id, *agy_args]
+    else:
+        target_cwd = os.getcwd() if args.local else str(ask_home)
+
+    isolated_env = dict(os.environ)
+    isolated_env["HOME"] = str(ask_home)
+
     code, conv_id = stream_ask_process(
         exe,
-        ["--model", model, "--output-format", "stream-json", "-p", full_prompt],
+        agy_args,
         model,
         stream_json=True,
+        cwd=target_cwd,
+        env=isolated_env,
     )
 
-    if not args.keep_history:
-        time.sleep(0.05)
-        new_ids: set[str] = set()
-        if conv_id:
-            new_ids.add(conv_id)
-        if conv_dir.is_dir():
-            new_ids.update({p.stem for p in conv_dir.glob("*.db")} - before_convs)
-        if brain_dir.is_dir():
-            new_ids.update({p.name for p in brain_dir.iterdir() if p.is_dir()} - before_brain)
-        remove_agy_conversation(cli_dir, new_ids)
+    if code == 0 and conv_id:
+        try:
+            last_file.write_text(json.dumps({"id": conv_id, "cwd": target_cwd}, indent=2) + "\n", encoding="utf-8")
+            index_path = ask_home / "index.json"
+            index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.is_file() else {}
+            preview = " ".join(args.query).strip()[:200] or full_prompt[:200]
+            index[conv_id] = {"cwd": target_cwd, "preview": preview, "ts": int(time.time())}
+            index_path.write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
+            prune_ask_home(ask_home)
+        except OSError:
+            pass
 
     return code
 
@@ -638,7 +838,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--engine", choices=["agy", "copilot"], required=True, help="AI CLI engine")
     p_run.add_argument("--ctx", action="store_true", help="Include recent terminal context")
     p_run.add_argument("--high", action="store_true", help="Use high-reasoning model (agy only)")
-    p_run.add_argument("--keep-history", action="store_true", help="Retain agy conversation state")
+    p_run.add_argument("--local", action="store_true", help="Run in current working directory instead of global ask-home")
+    p_run.add_argument("-r", "--reply", action="store_true", help="Reply to the most recent ask conversation in its original cwd")
+    p_run.add_argument("-c", "--continue", dest="continue_interactive", action="store_true", help="Open interactive agy session on the most recent ask conversation")
+    p_run.add_argument("--keep-history", action="store_true", help="Retain agy conversation in main ~/.gemini/antigravity-cli")
     p_run.add_argument("--executable", help="Override CLI binary path (for testing)")
     p_run.add_argument("--preamble", help="Override prompt preamble")
     p_run.add_argument("--fallback-command", help="Fallback command if top prompt scrolled off")

@@ -107,8 +107,8 @@ hl.env("HYPRCURSOR_SIZE", "24")
 -- Refer to https://wiki.hypr.land/configuring/core/config-options/
 hl.config({
     general = {
-        gaps_in  = 15,
-        gaps_out = 30,
+        gaps_in  = 10,
+        gaps_out = 20,
 
         border_size = 2,
 
@@ -305,6 +305,8 @@ hl.bind(mainMod .. " + J", hl.dsp.layout("togglesplit"))    -- dwindle only
 
 -- Other apps
 hl.bind(mainMod .. " + A", hl.dsp.exec_cmd("ghostty -e agy -c"))
+hl.bind(mainMod .. " + CTRL + A", hl.dsp.exec_cmd("~/code/projects/rig/configs/bin/agy-picker"))
+hl.bind(mainMod .. " + SHIFT + A", hl.dsp.exec_cmd("~/code/projects/rig/configs/bin/agy-picker --ask"))
 hl.bind(mainMod .. " + B", hl.dsp.exec_cmd("brave"))
 
 -- Power menu

@@ -76,7 +76,13 @@ def pick_topic_with_fzf(vault: Path) -> str | None:
     return chosen if proc.returncode == 0 and chosen else None
 
 
-def resolve_topic(explicit: str | None, vault: Path, *, allow_fzf: bool) -> str:
+def resolve_topic(
+    explicit: str | None,
+    vault: Path,
+    *,
+    allow_fzf: bool,
+    default_to_date: bool = False,
+) -> str:
     if explicit:
         return sanitize_topic(explicit)
     top = git_root()
@@ -86,6 +92,8 @@ def resolve_topic(explicit: str | None, vault: Path, *, allow_fzf: bool) -> str:
         picked = pick_topic_with_fzf(vault)
         if picked:
             return sanitize_topic(picked)
+    if default_to_date:
+        return datetime.now().strftime("%Y-%m-%d")
     raise ValueError("Specify a topic outside a git repository (or run inside a repo).")
 
 
@@ -185,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
             text = piped_stdin.strip() if piped_stdin.strip() else " ".join(tokens).strip()
             if not text:
                 raise ValueError("Provide note text or pipe stdin: note -a \"thought\"")
-            topic = resolve_topic(args.topic, vault, allow_fzf=False)
+            topic = resolve_topic(args.topic, vault, allow_fzf=False, default_to_date=True)
             raw_path = resolve_raw_note(vault, topic)
             append_raw_entry(raw_path, topic, text)
             print(ctext(f"✓ Appended to {raw_path}", "green"))

@@ -570,6 +570,145 @@ class TestClipboardJwtAndDecide(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
+    def test_triage_files_extension_and_safety_guards(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tdir = Path(tmp)
+            old_ts = time.time() - 300
+            for fname in ("archive.zip", "app.AppImage", "partial.crdownload", "fresh.zip"):
+                p = tdir / fname
+                p.write_text("demo", encoding="utf-8")
+                if fname != "fresh.zip":
+                    os.utime(p, (old_ts, old_ts))
+
+            dry = run_cli(BIN_DIR / "triage-files", ["--dir", str(tdir), "--dry-run"], env={"GEMINI_API_KEY": ""})
+            self.assertEqual(dry.returncode, 0, dry.stderr)
+            self.assertIn("[DRY-RUN] archive.zip -> archives/archive.zip", dry.stdout)
+            self.assertTrue((tdir / "archive.zip").is_file())
+
+            real = run_cli(BIN_DIR / "triage-files", ["--dir", str(tdir)], env={"GEMINI_API_KEY": ""})
+            self.assertEqual(real.returncode, 0, real.stderr)
+            self.assertTrue((tdir / "archives" / "archive.zip").is_file())
+            self.assertTrue((tdir / "installers" / "app.AppImage").is_file())
+            self.assertTrue((tdir / "partial.crdownload").is_file())
+            self.assertTrue((tdir / "fresh.zip").is_file())
+
+    def test_ask_helper_isolated_home_local_and_resume_guard(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tpath = Path(tmp)
+            ask_home = tpath / "ask-home"
+            proj_dir = tpath / "proj"
+            proj_dir.mkdir()
+            fake_agy = tpath / "fake-agy.py"
+            fake_agy.write_text(
+                "\n".join(
+                    [
+                        "import json, os, sys",
+                        "msg = 'cwd=' + os.getcwd() + ' home=' + os.environ.get('HOME', '') + ' args=' + repr(sys.argv[1:])",
+                        "print(json.dumps({'event': 'result', 'result': {'conversation_id': 'conv-123', 'status': 'SUCCESS', 'response': msg}}))",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            fake_bin = tpath / "fake-agy"
+            fake_bin.write_text(f"#!/usr/bin/env sh\nexec {sys.executable} {fake_agy} \"$@\"\n", encoding="utf-8")
+            os.chmod(fake_bin, 0o755)
+
+            env = {"RIG_ASK_HOME": str(ask_home), "RIG_ASK_EXECUTABLE": str(fake_bin)}
+
+            # 1. -r + --local must error before reaching agent
+            r_err = run_cli(BIN_DIR / "ask-helper", ["run", "--engine", "agy", "-r", "--local", "hi"], env=env, cwd=proj_dir)
+            self.assertEqual(r_err.returncode, 2)
+            self.assertIn("cannot combine -r/--reply with --local", r_err.stderr)
+
+            # 2. --local runs in proj_dir with isolated ask-home
+            r_loc = run_cli(BIN_DIR / "ask-helper", ["run", "--engine", "agy", "--local", "hello"], env=env, cwd=proj_dir)
+            self.assertEqual(r_loc.returncode, 0, r_loc.stderr)
+            self.assertIn(f"cwd={proj_dir}", r_loc.stdout, f"STDERR:\n{r_loc.stderr}")
+            self.assertIn(f"home={ask_home}", r_loc.stdout)
+            self.assertTrue((ask_home / ".gemini" / "GEMINI.md").is_symlink())
+            self.assertFalse((ask_home / ".gemini" / "skills").exists())
+
+            # 3. -r from anywhere inherits proj_dir and passes --conversation conv-123
+            r_res = run_cli(BIN_DIR / "ask-helper", ["run", "--engine", "agy", "-r", "follow up"], env=env, cwd=tpath)
+            self.assertEqual(r_res.returncode, 0, r_res.stderr)
+            self.assertIn(f"cwd={proj_dir}", r_res.stdout)
+            self.assertIn("'--conversation', 'conv-123'", r_res.stdout)
+
+            # 4. -c --local errors before reaching agent; -c launches interactive agy in proj_dir
+            r_cerr = run_cli(BIN_DIR / "ask-helper", ["run", "--engine", "agy", "-c", "--local"], env=env, cwd=tpath)
+            self.assertEqual(r_cerr.returncode, 2)
+            r_cont = run_cli(BIN_DIR / "ask-helper", ["run", "--engine", "agy", "-c"], env=env, cwd=tpath)
+            self.assertEqual(r_cont.returncode, 0, r_cont.stderr)
+            self.assertIn(f"cwd={proj_dir}", r_cont.stdout)
+            self.assertIn("'--conversation', 'conv-123'", r_cont.stdout)
+            self.assertNotIn("'-p'", r_cont.stdout)
+
+    def test_agy_picker_loads_top_level_conversations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tpath = Path(tmp)
+            ws_dir = tpath / "my-repo"
+            ws_dir.mkdir()
+            conv_dir = tpath / "conversations"
+            conv_dir.mkdir()
+            (conv_dir / "cid-top.db").write_text("db", encoding="utf-8")
+            (conv_dir / "cid-sub.db").write_text("db", encoding="utf-8")
+            (conv_dir / "cid-empty.db").write_text("db", encoding="utf-8")
+            db_path = tpath / "conversation_summaries.db"
+            con = sqlite3.connect(str(db_path))
+            con.execute(
+                """
+                CREATE TABLE conversation_summaries (
+                    conversation_id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL DEFAULT "",
+                    preview TEXT NOT NULL DEFAULT "",
+                    step_count INTEGER NOT NULL DEFAULT 0,
+                    workspace_uris TEXT NOT NULL,
+                    last_modified_time TEXT NOT NULL,
+                    parent_conversation_id TEXT NOT NULL DEFAULT ""
+                )
+                """
+            )
+            con.execute(
+                "INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("cid-top", "Fix Picker", "ignored preview", 4, json.dumps([ws_dir.as_uri()]), "2026-11-22T00:10:00Z", ""),
+            )
+            con.execute(
+                "INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("cid-sub", "Subagent", "", 2, "[]", "2026-11-22T00:11:00Z", "cid-top"),
+            )
+            con.execute(
+                "INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("cid-empty", "", "", 0, "[]", "0001-01-01 00:00:00+00:00", ""),
+            )
+            con.commit()
+            con.close()
+
+            res = run_cli(BIN_DIR / "agy-picker", ["--list"], env={"RIG_AGY_CLI_DIR": str(tpath)})
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertIn("cid-top", res.stdout)
+            self.assertIn(str(ws_dir), res.stdout)
+            self.assertIn("Fix Picker  [my-repo]", res.stdout)
+            self.assertNotIn("cid-sub", res.stdout)
+            self.assertNotIn("cid-empty", res.stdout)
+
+            # Verify --ask points at RIG_ASK_HOME/.gemini/antigravity-cli
+            ask_cli = tpath / "ask-home" / ".gemini" / "antigravity-cli"
+            (ask_cli / "conversations").mkdir(parents=True)
+            (ask_cli / "conversations" / "cid-ask.db").write_text("db", encoding="utf-8")
+            shutil.copy2(db_path, ask_cli / "conversation_summaries.db")
+            con2 = sqlite3.connect(str(ask_cli / "conversation_summaries.db"))
+            con2.execute("DELETE FROM conversation_summaries")
+            con2.execute(
+                "INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("cid-ask", "", "Quick ask question", 2, json.dumps([ws_dir.as_uri()]), "2026-11-22T00:15:00Z", ""),
+            )
+            con2.commit()
+            con2.close()
+            res_ask = run_cli(BIN_DIR / "agy-picker", ["--ask", "--list"], env={"RIG_ASK_HOME": str(tpath / "ask-home")})
+            self.assertEqual(res_ask.returncode, 0, res_ask.stderr)
+            self.assertIn("cid-ask", res_ask.stdout)
+            self.assertIn("Quick ask question", res_ask.stdout)
+
 
 class TestAskHelper(unittest.TestCase):
     def test_terminal_blocks_slices_out_and_streaming_cleanup(self) -> None:
@@ -861,6 +1000,16 @@ class TestWorkset(unittest.TestCase):
             self.assertEqual(r_list.returncode, 0, r_list.stderr)
             self.assertIn("state-machine-app", r_list.stdout)
             self.assertIn("state-machine-bug", r_list.stdout)
+
+            # `note -a` outside a git repo defaults to YYYY-MM-DD.md
+            non_repo = tpath / "not-a-repo"
+            non_repo.mkdir()
+            r_date_add = run_cli(BIN_DIR / "note", ["-a", "quick stray thought"], cwd=non_repo, env=env)
+            self.assertEqual(r_date_add.returncode, 0, r_date_add.stderr)
+            from datetime import datetime
+            today_raw = vault / "raw" / f"{datetime.now().strftime('%Y-%m-%d')}.md"
+            self.assertTrue(today_raw.is_file())
+            self.assertIn("quick stray thought", today_raw.read_text(encoding="utf-8"))
 
 
 class TestZshFunctionsViaBash(unittest.TestCase):

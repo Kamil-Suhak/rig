@@ -12,50 +12,39 @@ _rig_last_history_command() {
     fc -ln -1 -1 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || true
 }
 
-# @cmd: out — Extract output from recent completed command block(s) (e.g. out, out ~2, out ~3..2)
+# @cmd: out — Extract output from recent completed command block(s) via pty-ring (e.g. out, out @2, out 3..2)
 out() {
     case "${1:-}" in
         -h|--help|-Help)
             cat <<'EOF'
-Usage: out [<selector>] [-c|--include-command]
+Usage: out [<selector>] [-o|--output-only]
 
-Capture output of recent completed command(s) from Kitty/WezTerm/tmux scrollback.
+Print command and output of recent completed command(s) recorded by pty-ring.
 Selectors:
-  1 / ~1       Last completed command (default)
+  1 / @1       Last completed command (default)
   N            Last N commands in chronological order
-  ~N           Nth-most-recent command
-  ~A..B        Chronological slice between offsets A and B
+  @N           Nth-most-recent command (quoted '~N' also works)
+  A..B         Chronological slice between offsets A and B (e.g. 3..2)
 
 Options:
-  -c, --include-command   Prepend '$ <command>' header
+  -o, --output-only       Omit '$ <command>' header and print output only
   -h, --help              Show this help
 EOF
             return 0
             ;;
     esac
 
-    local last_cmd
-    last_cmd="$(_rig_last_history_command)"
-    if [ -n "$last_cmd" ]; then
-        "${RIG_PYTHON:-python3}" "$RIG_ROOT/configs/bin/ask-helper" out "$@" --fallback-command "$last_cmd"
-    else
-        "${RIG_PYTHON:-python3}" "$RIG_ROOT/configs/bin/ask-helper" out "$@"
-    fi
+    "${RIG_PYTHON:-python3}" "$RIG_ROOT/configs/bin/ask-helper" out "$@"
 }
 
-# @cmd: lastout — Alias for 'out'
-lastout() {
-    out "$@"
-}
-
-# @cmd: rerun — Re-run recent shell commands selected by N, ~N, or ~A..B (-y to skip confirmation)
+# @cmd: rerun — Re-run recent shell commands selected by N, @N, or A..B (-y to skip confirmation)
 rerun() {
     if [ "${__RIG_IN_RERUN:-0}" = "1" ]; then
         printf '✖ rerun: Nested rerun invocation blocked.\n' >&2
         return 1
     fi
 
-    local selector="~1"
+    local selector="@1"
     local assume_yes=0
     local got_selector=0
 
@@ -66,7 +55,7 @@ rerun() {
 Usage: rerun [<selector>] [-y|--yes]
 
 Inspect and re-execute prior shell commands (skips entries whose command verb is 'rerun').
-Selectors: ~1 (default), N (last N), ~N (Nth last), ~A..B (chronological slice).
+Selectors: @1 (default), N (last N), @N (Nth last), A..B (chronological slice).
 EOF
                 return 0
                 ;;
@@ -136,8 +125,7 @@ def invokes_rerun(cmd: str) -> bool:
 
 candidates = [ln.strip() for ln in hist_raw.splitlines() if ln.strip() and not invokes_rerun(ln.strip())]
 if not candidates:
-    buf_lines = ask_helper.read_terminal_buffer()
-    blocks = ask_helper.convert_to_terminal_blocks(buf_lines)
+    blocks = ask_helper.read_pty_ring_blocks()
     candidates = [b["command"] for b in blocks if b.get("command") and not invokes_rerun(b["command"])]
 
 if not candidates:

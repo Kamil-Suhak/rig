@@ -711,47 +711,39 @@ class TestClipboardJwtAndDecide(unittest.TestCase):
 
 
 class TestAskHelper(unittest.TestCase):
-    def test_terminal_blocks_slices_out_and_streaming_cleanup(self) -> None:
+    def test_pty_ring_slices_out_and_streaming_cleanup(self) -> None:
         ask_mod = load_extensionless_module("ask_helper_mod", BIN_DIR / "ask-helper")
 
-        lines = [
-            "top scrolled output line",
-            "~/repo \ue0b0 \u276f ls",
-            "a.txt",
-            "b.txt",
-            "",
-            "~/repo  main  \u276f pytest",
-            "2 passed",
-            "~/repo \u276f ",
-        ]
-        blocks = ask_mod.convert_to_terminal_blocks(lines)
-        self.assertEqual(len(blocks), 2)
-        self.assertEqual(blocks[0]["command"], "ls")
-        self.assertEqual(blocks[0]["output"], ["a.txt", "b.txt"])
-        self.assertEqual(blocks[1]["command"], "pytest")
-        self.assertEqual(blocks[1]["output"], ["2 passed"])
-
-        # Fallback command recovers leading output when only trailing active prompt visible
-        scroll_blocks = ask_mod.convert_to_terminal_blocks(
-            ["scrolled line 1", "", "~/repo \u276f "],
-            fallback_command="git status",
-        )
-        self.assertEqual(scroll_blocks, [{"command": "git status", "output": ["scrolled line 1"]}])
-
+        self.assertEqual(ask_mod.resolve_block_indices("@2", 4), [2])
         self.assertEqual(ask_mod.resolve_block_indices("~2", 4), [2])
         self.assertEqual(ask_mod.resolve_block_indices("2", 4), [2, 3])
+        self.assertEqual(ask_mod.resolve_block_indices("3..2", 4), [1, 2])
+        self.assertEqual(ask_mod.resolve_block_indices("@3..2", 4), [1, 2])
         self.assertEqual(ask_mod.resolve_block_indices("~3..2", 4), [1, 2])
         self.assertEqual(ask_mod.resolve_block_indices("~3..~1", 4), [1, 2, 3])
 
         with tempfile.TemporaryDirectory() as tmp:
             tpath = Path(tmp)
-            buf = tpath / "screen.txt"
-            buf.write_text("\n".join(lines) + "\n", encoding="utf-8")
-            env = {"RIG_TEST_TERMINAL_BUFFER": str(buf)}
+            ring_json = tpath / "ring.json"
+            ring_json.write_text(
+                json.dumps(
+                    [
+                        {"command": "ls", "exit_code": 0, "output": ["a.txt", "b.txt"]},
+                        {"command": "pytest", "exit_code": 1, "output": ["2 passed"]},
+                        {"command": "out", "exit_code": 0, "output": ["2 passed"]},
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            env = {"RIG_TEST_PTY_RING_JSON": str(ring_json)}
 
-            res_out = run_cli(BIN_DIR / "ask-helper", ["out", "~2", "-c"], env=env)
+            res_out_default = run_cli(BIN_DIR / "ask-helper", ["out"], env=env)
+            self.assertEqual(res_out_default.returncode, 0, res_out_default.stderr)
+            self.assertEqual(res_out_default.stdout.splitlines(), ["$ pytest", "2 passed"])
+
+            res_out = run_cli(BIN_DIR / "ask-helper", ["out", "@2", "-o"], env=env)
             self.assertEqual(res_out.returncode, 0, res_out.stderr)
-            self.assertEqual(res_out.stdout.splitlines(), ["$ ls", "a.txt", "b.txt"])
+            self.assertEqual(res_out.stdout.splitlines(), ["a.txt", "b.txt"])
 
             res_prompt = run_cli(BIN_DIR / "ask-helper", ["build-prompt", "--ctx", "2", "why?"], env=env)
             self.assertEqual(res_prompt.returncode, 0, res_prompt.stderr)
@@ -1077,7 +1069,7 @@ class TestZshFunctionsViaBash(unittest.TestCase):
             script1 = "\n".join(
                 [
                     "set -e",
-                    "for fn in gdiff b nb lg wip unwip stashes groot mkcd p open out lastout rerun which venv copy paste ask update install remove clean try; do",
+                    "for fn in gdiff b nb lg wip unwip stashes groot mkcd p open out rerun which venv copy paste ask update install remove clean try; do",
                     '  "$fn" -h >/dev/null',
                     "done",
                     "which profile -h",

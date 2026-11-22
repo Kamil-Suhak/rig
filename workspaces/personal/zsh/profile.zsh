@@ -35,7 +35,7 @@ Usage: ask [--ctx [<sel>]] [--high] [--local] [-r|--reply] [-c|--continue] [--ke
 Query Antigravity CLI ('agy') in an isolated ask-home with streamed response.
 Accepts piped input (e.g. 'out | ask "why did this fail?"').
 Options:
-  --ctx              Include terminal command/output slice (default ~1; pass 2, ~2, or ~3..2 before question)
+  --ctx              Include terminal command/output slice (default @1; pass 2, @2, or 3..2 before question)
   --high             Use high-reasoning model (gemini-4-hydrogen-high)
   --local            Run in current working directory (picks up repo-local GEMINI.md/AGENTS.md)
   -r, --reply        Send a follow-up prompt to the most recent ask conversation (inherits its cwd)

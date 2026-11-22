@@ -14,6 +14,7 @@ window-padding-y = 8
 window-decoration = auto
 
 # Quality of life
+command = ~/.local/bin/pty-ring /usr/bin/zsh
 shell-integration = zsh
 mouse-hide-while-typing = true
 confirm-close-surface = false

@@ -14,3 +14,5 @@ configs/plugins/*/.git
 # Python bytecode
 __pycache__/
 *.py[cod]
+
+tools/pty-ring/target/

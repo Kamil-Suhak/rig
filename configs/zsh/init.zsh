@@ -455,6 +455,27 @@ if [ -n "${ZSH_VERSION:-}" ]; then
             . "$RIG_ROOT/configs/zsh/keybinds.zsh"
         fi
 
+        if [ -n "${GHOSTTY_RESOURCES_DIR:-}" ] && [ -f "$GHOSTTY_RESOURCES_DIR/shell-integration/zsh/ghostty-integration" ]; then
+            . "$GHOSTTY_RESOURCES_DIR/shell-integration/zsh/ghostty-integration"
+        fi
+
+        if [ -n "${PTY_RING_SOCK:-}" ]; then
+            _rig_pty_ring_preexec() {
+                local LC_ALL=C
+                local i hex="" h=""
+                for (( i = 1; i <= ${#1}; i++ )); do
+                    printf -v h '%02x' "'${1[i]}"
+                    hex+="$h"
+                done
+                printf '\e]777;pty-ring-cmd;%s\a' "$hex"
+            }
+            if [ -n "${preexec_functions+x}" ]; then
+                preexec_functions+=(_rig_pty_ring_preexec)
+            else
+                preexec_functions=(_rig_pty_ring_preexec)
+            fi
+        fi
+
         if [ -n "${precmd_functions+x}" ]; then
             precmd_functions+=(_rig_update_prompt_vars)
         else

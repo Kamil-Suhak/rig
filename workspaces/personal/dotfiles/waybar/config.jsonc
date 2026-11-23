@@ -1,16 +1,35 @@
 [
   {
     "output": "eDP-1",
-    "layer": "top",
+    "layer": "bottom",
     "position": "top",
     "height": 30,
     "margin-top": 6,
     "margin-left": 8,
     "margin-right": 8,
     "spacing": 6,
-    "modules-left": ["hyprland/workspaces"],
+    "modules-left": ["hyprland/workspaces", "hyprland/window"],
     "modules-center": ["clock"],
-    "modules-right": ["pulseaudio", "network", "battery", "tray"],
+    "modules-right": ["idle_inhibitor", "pulseaudio", "bluetooth", "network", "battery", "tray"],
+    "hyprland/window": {
+      "format": "{title}",
+      "max-length": 45,
+      "separate-outputs": true
+    },
+    "idle_inhibitor": {
+      "format": "{icon}",
+      "format-icons": { "activated": "󰅶", "deactivated": "󰾪" },
+      "tooltip": true,
+      "tooltip-format-activated": "Keep awake: ON",
+      "tooltip-format-deactivated": "Keep awake: OFF"
+    },
+    "bluetooth": {
+      "format": "󰂯",
+      "format-connected": "󰂱 {device_alias}",
+      "format-off": "󰂲",
+      "tooltip-format": "{controller_alias}\t{status}",
+      "on-click": "ghostty --class=com.bluetui.float -e bluetui"
+    },
     "hyprland/workspaces": {
       "format": "{id}",
       "on-click": "activate",
@@ -18,7 +37,8 @@
     },
     "clock": {
       "format": "{:%a %d %b  %H:%M}",
-      "tooltip-format": "<tt>{calendar}</tt>"
+      "tooltip": false,
+      "on-click": "pkill -x waycal || waycal"
     },
     "pulseaudio": {
       "format": "󰕾 {volume}%",
@@ -44,16 +64,35 @@
   {
     "output": "HDMI-A-1",
     "name": "external",
-    "layer": "top",
+    "layer": "bottom",
     "position": "top",
     "height": 34,
     "margin-top": 6,
     "margin-left": 8,
     "margin-right": 8,
     "spacing": 6,
-    "modules-left": ["hyprland/workspaces"],
+    "modules-left": ["hyprland/workspaces", "hyprland/window"],
     "modules-center": ["clock"],
-    "modules-right": ["pulseaudio", "network", "battery", "tray"],
+    "modules-right": ["idle_inhibitor", "pulseaudio", "bluetooth", "network", "battery", "tray"],
+    "hyprland/window": {
+      "format": "{title}",
+      "max-length": 45,
+      "separate-outputs": true
+    },
+    "idle_inhibitor": {
+      "format": "{icon}",
+      "format-icons": { "activated": "󰅶", "deactivated": "󰾪" },
+      "tooltip": true,
+      "tooltip-format-activated": "Keep awake: ON (sleep and lock paused)",
+      "tooltip-format-deactivated": "Keep awake: OFF (normal sleep and lock)"
+    },
+    "bluetooth": {
+      "format": "󰂯",
+      "format-connected": "󰂱 {device_alias}",
+      "format-off": "󰂲",
+      "tooltip-format": "{controller_alias}\t{status}",
+      "on-click": "ghostty --class=com.bluetui.float -e bluetui"
+    },
     "hyprland/workspaces": {
       "format": "{id}",
       "on-click": "activate",
@@ -61,7 +100,8 @@
     },
     "clock": {
       "format": "{:%a %d %b  %H:%M}",
-      "tooltip-format": "<tt>{calendar}</tt>"
+      "tooltip": false,
+      "on-click": "pkill -x waycal || waycal"
     },
     "pulseaudio": {
       "format": "󰕾 {volume}%",

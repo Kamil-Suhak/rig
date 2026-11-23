@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _rig_common import ANSI_CODES, normalize_legacy_flags, read_config_lines, should_use_color  # noqa: E402
+from _rig_common import ANSI_CODES, call_gemini_decisions, normalize_legacy_flags, read_config_lines, should_use_color  # noqa: E402
 
 SELECTOR_TOKEN_RE = re.compile(r"^(?:\d+|[~@]?\d+\.\.[~@]?\d+|[~@]\d+)$")
 
@@ -545,33 +545,22 @@ def _decide_keep_or_prune(prompt_preview: str) -> str:
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not api_key or not prompt_preview.strip():
         return "prune"
-    import urllib.error
-    import urllib.request
-
-    payload = json.dumps(
-        {
-            "model": "gemini-decision-1",
-            "input": prompt_preview[:1000],
+    questions = {
+        "verdict": {
+            "type": "choice",
             "instructions": (
                 "Decide whether this Q&A thread has lasting reference value ('keep') "
                 "or is a trivial one-off syntax/typo/throwaway question ('prune')."
             ),
-            "choices": ["keep", "prune"],
+            "criteria": {"keep": "Option: keep", "prune": "Option: prune"},
         }
-    ).encode("utf-8")
-    req = urllib.request.Request(
-        f"https://generativelanguage.googleapis.com/v1beta/decisions?key={api_key}",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    }
     try:
-        with urllib.request.urlopen(req, timeout=3.0) as resp:
-            body = json.loads(resp.read().decode("utf-8", errors="replace"))
+        body = call_gemini_decisions(prompt_preview[:1000], questions, api_key=api_key, timeout=3.0)
         verdict = (body.get("answers") or {}).get("verdict") or body
         choice = str(verdict.get("choice") or verdict.get("decision") or "prune").strip().lower()
         return choice if choice in ("keep", "prune") else "prune"
-    except (OSError, urllib.error.URLError, ValueError):
+    except Exception:
         return "prune"
 
 

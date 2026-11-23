@@ -17,7 +17,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _rig_common import ctext  # noqa: E402
+from _rig_common import call_gemini_decisions, ctext  # noqa: E402
 
 DEFAULT_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/decisions"
 MAX_MULTIMODAL_BYTES = 50 * 1024 * 1024
@@ -41,7 +41,7 @@ EXTENSION_BUCKETS = {
     ".bz2": "archives",
 }
 
-DECIDE_BUCKETS = ["receipts", "work", "study", "wallpapers", "memes", "reference", "unsorted"]
+DECIDE_BUCKETS = ["code", "ui", "memes", "docs", "trash", "unsorted"]
 MULTIMODAL_MIMES = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -66,57 +66,69 @@ def _unique_dest(dest_dir: Path, filename: str) -> Path:
         idx += 1
 
 
-def _call_decide_for_file(path: Path, api_key: str) -> tuple[str, float]:
+def _build_item_parts(path: Path) -> list[dict[str, object]] | None:
     ext = path.suffix.lower()
     size = path.stat().st_size
     if size > MAX_MULTIMODAL_BYTES:
-        return "unsorted", 0.0
-
+        return None
     mime = MULTIMODAL_MIMES.get(ext) or mimetypes.guess_type(str(path))[0]
     if ext in MULTIMODAL_MIMES and mime:
         b64 = base64.b64encode(path.read_bytes()).decode("ascii")
-        input_field: object = [
-            {"text": f"Filename: {path.name}"},
-            {"inlineData": {"mimeType": mime, "data": b64}},
+        item_type = "image" if mime.startswith("image/") else "document"
+        return [
+            {"type": "text", "text": f"File: {path.name}"},
+            {"type": item_type, "data": b64, "mime_type": mime},
         ]
-    elif ext in TEXT_EXTS:
+    if ext in TEXT_EXTS:
         snippet = path.read_text(encoding="utf-8", errors="replace")[:2000]
-        input_field = f"Filename: {path.name}\n\n{snippet}"
-    else:
-        return "unsorted", 0.0
+        return [{"type": "text", "text": f"File: {path.name}\n\n{snippet}"}]
+    return None
 
-    payload = json.dumps(
-        {
-            "model": "gemini-decision-1",
-            "input": input_field,
+
+def _call_decide_batch(paths: list[Path], api_key: str, *, dry_run: bool = False) -> dict[Path, tuple[str, float]]:
+    input_parts: list[dict[str, object]] = []
+    questions: dict[str, dict[str, object]] = {}
+    key_map: dict[str, Path] = {}
+    results: dict[Path, tuple[str, float]] = {}
+
+    for idx, p in enumerate(paths):
+        parts = _build_item_parts(p)
+        if not parts:
+            results[p] = ("unsorted", 0.0)
+            continue
+        qkey = f"file_{idx}"
+        key_map[qkey] = p
+        input_parts.append({"type": "text", "text": f"[{qkey}]"})
+        input_parts.extend(parts)
+        questions[qkey] = {
+            "type": "choice",
             "instructions": (
-                "Classify this downloaded file or screenshot into one bucket: "
-                "receipts (invoices/bills/orders), work (code/diagrams/work docs), "
-                "study (notes/papers/tutorials), wallpapers (desktop backgrounds), "
-                "memes (humor/social), reference (manuals/cheatsheets/articles), "
-                "or unsorted (unclear/ambiguous)."
+                f"Classify {qkey} ({p.name}) into one mutually exclusive bucket: "
+                "code (terminals, IDEs, code snippets, errors), "
+                "ui (desktop ricing, window managers, app UI/design), "
+                "memes (humor, stream/video frames, social/chat), "
+                "docs (receipts, invoices, PDFs, notes, articles), "
+                "trash (throwaway one-off crops, accidental screenshots, temp clutter), "
+                "or unsorted (ambiguous)."
             ),
-            "choices": DECIDE_BUCKETS,
+            "criteria": {b: f"Bucket: {b}" for b in DECIDE_BUCKETS},
         }
-    ).encode("utf-8")
 
-    req = urllib.request.Request(
-        f"{DEFAULT_ENDPOINT}?key={api_key}",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=20.0) as resp:
-        body = json.loads(resp.read().decode("utf-8", errors="replace"))
+    if not questions:
+        return results
 
-    verdict = (body.get("answers") or {}).get("verdict") or body
-    decision = str(verdict.get("choice") or verdict.get("decision") or "unsorted").strip().lower()
-    raw_conf = verdict.get("confidence", verdict.get("score", 0.0))
-    try:
-        conf = float(raw_conf)
-    except (TypeError, ValueError):
-        conf = 0.0
-    return decision, conf
+    body = call_gemini_decisions(input_parts, questions, api_key=api_key, dry_run=dry_run, timeout=30.0)
+
+    answers = body.get("answers") or {}
+    for qkey, p in key_map.items():
+        verdict = answers.get(qkey) or {}
+        decision = str(verdict.get("choice") or verdict.get("decision") or "unsorted").strip().lower()
+        try:
+            conf = float(verdict.get("confidence", verdict.get("score", 0.0)))
+        except (TypeError, ValueError):
+            conf = 0.0
+        results[p] = (decision, conf)
+    return results
 
 
 def triage_directory(
@@ -124,6 +136,7 @@ def triage_directory(
     *,
     min_age: int,
     min_confidence: float,
+    batch_size: int,
     dry_run: bool,
     api_key: str,
 ) -> list[str]:
@@ -132,6 +145,18 @@ def triage_directory(
 
     now = time.time()
     actions: list[str] = []
+    decide_queue: list[Path] = []
+
+    def _move_file(entry: Path, bucket: str, reason: str) -> None:
+        dest_dir = directory / bucket
+        dest = _unique_dest(dest_dir, entry.name)
+        if dry_run:
+            actions.append(f"[DRY-RUN] {entry.name} -> {bucket}/{dest.name} ({reason})")
+        else:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(entry), str(dest))
+            actions.append(f"[MOVED] {entry.name} -> {bucket}/{dest.name} ({reason})")
+
     for entry in sorted(directory.iterdir(), key=lambda p: p.name.lower()):
         if not entry.is_file() or entry.name.startswith("."):
             continue
@@ -144,33 +169,27 @@ def triage_directory(
         if age < min_age:
             continue
 
-        ext = entry.suffix.lower()
-        bucket = EXTENSION_BUCKETS.get(ext)
-        reason = "extension"
-        conf = 1.0
+        ext_bucket = EXTENSION_BUCKETS.get(entry.suffix.lower())
+        if ext_bucket:
+            _move_file(entry, ext_bucket, "extension")
+        elif api_key:
+            decide_queue.append(entry)
 
-        if not bucket:
-            if not api_key:
-                continue
-            try:
-                decision, conf = _call_decide_for_file(entry, api_key)
-            except (OSError, urllib.error.URLError, ValueError) as exc:
-                actions.append(f"[WARN] {entry.name}: decide failed ({exc})")
-                continue
-            if decision == "unsorted" or decision not in DECIDE_BUCKETS or conf < min_confidence:
-                actions.append(f"[SKIP] {entry.name}: {decision} (conf={conf:.2f} < {min_confidence:.2f})")
-                continue
-            bucket = decision
-            reason = f"decide conf={conf:.2f}"
-
-        dest_dir = directory / bucket
-        dest = _unique_dest(dest_dir, entry.name)
-        if dry_run:
-            actions.append(f"[DRY-RUN] {entry.name} -> {bucket}/{dest.name} ({reason})")
-        else:
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(entry), str(dest))
-            actions.append(f"[MOVED] {entry.name} -> {bucket}/{dest.name} ({reason})")
+    for i in range(0, len(decide_queue), max(1, batch_size)):
+        batch = decide_queue[i : i + max(1, batch_size)]
+        try:
+            verdicts = _call_decide_batch(batch, api_key, dry_run=dry_run)
+        except (OSError, RuntimeError, urllib.error.URLError, ValueError) as exc:
+            actions.append(f"[WARN] batch ({len(batch)} file(s)): decide failed ({exc})")
+            continue
+        for entry in batch:
+            decision, conf = verdicts.get(entry, ("unsorted", 0.0))
+            if dry_run and decision == "dry-run":
+                _move_file(entry, "dry-run", "validated via call_gemini_decisions")
+            elif decision == "unsorted" or decision not in DECIDE_BUCKETS or conf < min_confidence:
+                _move_file(entry, "ambiguous", f"low-conf {decision} ({conf:.2f} < {min_confidence:.2f})")
+            else:
+                _move_file(entry, decision, f"decide conf={conf:.2f}")
     return actions
 
 
@@ -216,7 +235,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--dir", action="append", dest="dirs", help="Directory to triage (repeatable; defaults to ~/Downloads and ~/Pictures/Screenshots)")
     parser.add_argument("--min-age", type=int, default=60, help="Skip files modified more recently than N seconds (default: 60)")
-    parser.add_argument("--min-confidence", type=float, default=0.85, help="Minimum decide confidence to move a file (default: 0.85)")
+    parser.add_argument("--min-confidence", type=float, default=0.70, help="Minimum decide confidence to move a file (default: 0.70)")
+    parser.add_argument("--batch-size", type=int, default=5, help="Max files per decide API batch (default: 5)")
     parser.add_argument("--dry-run", action="store_true", help="Preview moves without modifying files")
     parser.add_argument("--install-timer", action="store_true", help="Install and enable systemd --user timer (rig-triage.timer)")
     return parser
@@ -241,6 +261,7 @@ def main(argv: list[str] | None = None) -> int:
             d,
             min_age=args.min_age,
             min_confidence=args.min_confidence,
+            batch_size=args.batch_size,
             dry_run=args.dry_run,
             api_key=api_key,
         ):

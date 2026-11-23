@@ -347,3 +347,72 @@ def resolve_workset_config(root: str | Path, workspace: str) -> dict:
             if isinstance(ws_cfg, dict):
                 merged.update(ws_cfg)
     return merged
+
+
+DECIDE_DEFAULT_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/decisions"
+
+
+def call_gemini_decisions(
+    input_data: object,
+    questions: dict[str, dict[str, object]],
+    *,
+    api_key: str,
+    dry_run: bool = False,
+    timeout: float = 30.0,
+) -> dict:
+    """Call Gemini Decisions API with global weekly quota & input-size guards."""
+    max_chars = int(os.environ.get("RIG_DECIDE_MAX_CHARS", "12000"))
+    max_bytes = int(os.environ.get("RIG_DECIDE_MAX_BYTES", str(25 * 1024 * 1024)))
+    weekly_limit = int(os.environ.get("RIG_DECIDE_WEEKLY_LIMIT", "200"))
+
+    if isinstance(input_data, str) and len(input_data) > max_chars:
+        raise RuntimeError(f"Decide input exceeds {max_chars} chars ({len(input_data)}).")
+
+    payload_bytes = json.dumps({"model": "gemini-decision-1", "input": input_data, "questions": questions}).encode("utf-8")
+    if len(payload_bytes) > max_bytes:
+        raise RuntimeError(f"Decide payload exceeds {max_bytes} bytes ({len(payload_bytes)}).")
+
+    state_root = Path(os.environ.get("RIG_STATE_HOME") or (Path.home() / ".local" / "state" / "rig")).expanduser()
+    usage_file = state_root / "decide-usage.json"
+    from datetime import date
+
+    week_key = date.today().strftime("%G-W%V")
+    usage = {"week": week_key, "count": 0}
+    if usage_file.is_file():
+        try:
+            loaded = json.loads(usage_file.read_text(encoding="utf-8"))
+            if loaded.get("week") == week_key:
+                usage["count"] = int(loaded.get("count", 0))
+        except (OSError, ValueError):
+            pass
+
+    if usage["count"] >= weekly_limit:
+        raise RuntimeError(f"Weekly Gemini Decisions limit reached ({usage['count']}/{weekly_limit} for {week_key}).")
+
+    if dry_run:
+        return {"dry_run": True, "answers": {k: {"choice": "dry-run", "confidence": 1.0} for k in questions}}
+
+    import urllib.error
+    import urllib.request
+
+    endpoint = os.environ.get("RIG_DECIDE_ENDPOINT") or DECIDE_DEFAULT_ENDPOINT
+    req = urllib.request.Request(
+        endpoint,
+        data=payload_bytes,
+        method="POST",
+        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"HTTP {exc.code}: {detail}") from exc
+
+    usage["count"] += 1
+    try:
+        usage_file.parent.mkdir(parents=True, exist_ok=True)
+        usage_file.write_text(json.dumps(usage, indent=2) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+    return body

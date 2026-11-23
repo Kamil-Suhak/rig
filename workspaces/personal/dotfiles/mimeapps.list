@@ -1,0 +1,7 @@
+[Added Associations]
+text/x-shellscript=org.gnome.TextEditor.desktop;
+x-scheme-handler/antigravity=antigravity.desktop;
+
+[Default Applications]
+x-scheme-handler/antigravity=antigravity.desktop
+x-scheme-handler/unityhub=ubuntu-unityhub.desktop

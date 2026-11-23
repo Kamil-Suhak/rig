@@ -660,7 +660,17 @@
         { "name": "mdcat", "repoSubpath": "mdcat", "localTarget": "~/.config/mdcat" },
         { "name": "micro", "repoSubpath": "micro", "localTarget": "~/.config/micro" },
         { "name": "networkmanager-dmenu", "repoSubpath": "networkmanager-dmenu", "localTarget": "~/.config/networkmanager-dmenu" },
-        { "name": "ghostty", "repoSubpath": "ghostty", "localTarget": "~/.config/ghostty" }
+        { "name": "ghostty", "repoSubpath": "ghostty", "localTarget": "~/.config/ghostty" },
+        { "name": "btop", "repoSubpath": "btop", "localTarget": "~/.config/btop" },
+        { "name": "gtk-3.0", "repoSubpath": "gtk-3.0", "localTarget": "~/.config/gtk-3.0" },
+        { "name": "gtk-4.0", "repoSubpath": "gtk-4.0", "localTarget": "~/.config/gtk-4.0" },
+        { "name": "nwg-look", "repoSubpath": "nwg-look", "localTarget": "~/.config/nwg-look" },
+        { "name": "wayland-scroll-factor", "repoSubpath": "wayland-scroll-factor", "localTarget": "~/.config/wayland-scroll-factor" },
+        { "name": "mimeapps.list", "repoSubpath": "mimeapps.list", "localTarget": "~/.config/mimeapps.list" },
+        { "name": "xdg-terminals.list", "repoSubpath": "xdg-terminals.list", "localTarget": "~/.config/xdg-terminals.list" },
+        { "name": "clipse-config", "repoSubpath": "clipse/config.json", "localTarget": "~/.config/clipse/config.json" },
+        { "name": "clipse-theme", "repoSubpath": "clipse/custom_theme.json", "localTarget": "~/.config/clipse/custom_theme.json" },
+        { "name": "spotatui", "repoSubpath": "spotatui/config.yml", "localTarget": "~/.config/spotatui/config.yml" }
       ]
     }
   }

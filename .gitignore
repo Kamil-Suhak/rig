@@ -16,3 +16,9 @@ __pycache__/
 *.py[cod]
 
 tools/pty-ring/target/
+workspaces/personal/dotfiles/micro/buffers/
+workspaces/personal/dotfiles/micro/backups/
+clipboard_history.json
+clipse.log
+tmp_files/
+soloist_credentials.yml

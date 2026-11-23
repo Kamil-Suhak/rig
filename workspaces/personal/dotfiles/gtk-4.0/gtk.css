@@ -1,0 +1,44 @@
+@import url("file:///usr/share/themes/Arc-Dark/gtk-4.0/gtk.css");
+
+/* waycal Atom One Dark overrides */
+window.waycal {
+  background: transparent;
+}
+
+.waycal-root {
+  background-color: rgba(40, 44, 52, 0.94);
+  color: #abb2bf;
+  border: 1px solid rgba(89, 89, 89, 0.67);
+}
+
+.waycal-root.rounded {
+  border: 1px solid rgba(89, 89, 89, 0.67);
+  border-radius: 12px;
+}
+
+.waycal-header {
+  color: #e5c07b;
+}
+
+.waycal-weekday {
+  color: #5c6370;
+}
+
+.waycal-day {
+  color: #abb2bf;
+}
+
+.waycal-day.dim {
+  color: #5c6370;
+}
+
+.waycal-day.today {
+  background-color: #61afef;
+  color: #282c34;
+  font-weight: bold;
+}
+
+.waycal-footer {
+  color: #5c6370;
+  border-top: 1px solid rgba(97, 175, 239, 0.2);
+}

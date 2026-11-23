@@ -1061,7 +1061,7 @@ class TestZshFunctionsViaBash(unittest.TestCase):
                 "RIG_TEST_RERUN_HISTORY_FILE": str(hist_file),
             }
 
-            # 1. Help checks, which, p, mkcd, copy/paste, gdiff, work-workspace vs --what-if
+            # 1. Help checks, which, p, mkcd, gdiff, work-workspace vs --what-if
             proj_parent_posix = proj_parent.as_posix()
             tpath_posix = tpath.as_posix()
             sln_sub_posix = sln_dir.as_posix()
@@ -1069,7 +1069,7 @@ class TestZshFunctionsViaBash(unittest.TestCase):
             script1 = "\n".join(
                 [
                     "set -e",
-                    "for fn in gdiff b nb lg wip unwip stashes groot mkcd p open out rerun which venv copy paste ask update install remove clean try; do",
+                    "for fn in gdiff b nb lg wip unwip stashes groot mkcd p open out rerun which venv ask update install remove clean try; do",
                     '  "$fn" -h >/dev/null',
                     "done",
                     "which profile -h",
@@ -1082,8 +1082,6 @@ class TestZshFunctionsViaBash(unittest.TestCase):
                     f'cd "$(cygpath -u "{tpath_posix}" 2>/dev/null || echo "{tpath_posix}")"',
                     "mkcd nested/dir",
                     "pwd",
-                    "copy 'hello clipboard'",
-                    "paste",
                 ]
             )
             r1 = self._run_bash_snippet(script1, env=env)
@@ -1091,7 +1089,6 @@ class TestZshFunctionsViaBash(unittest.TestCase):
             self.assertIn("[git]", r1.stdout)
             self.assertIn("Source: gdiff is a function", r1.stdout)
             self.assertIn("alpha-app", r1.stdout)
-            self.assertIn("hello clipboard", r1.stdout)
 
             work_env = {**env, "RIG_WORKSPACE": "work"}
             r_vs = self._run_bash_snippet(

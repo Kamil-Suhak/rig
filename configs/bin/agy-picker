@@ -105,7 +105,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{item['id']}\t{item['cwd']}\t{item['display']}")
         return 0
 
-    fuzzel = shutil.which("fuzzel")
+    toggle_script = Path.home() / ".config" / "hypr" / "scripts" / "fuzzel-toggle.sh"
+    fuzzel = str(toggle_script) if toggle_script.is_file() else shutil.which("fuzzel")
     if not fuzzel:
         print("✖ agy-picker: 'fuzzel' not found in PATH.", file=sys.stderr)
         return 1

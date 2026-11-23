@@ -661,6 +661,7 @@
         { "name": "micro", "repoSubpath": "micro", "localTarget": "~/.config/micro" },
         { "name": "networkmanager-dmenu", "repoSubpath": "networkmanager-dmenu", "localTarget": "~/.config/networkmanager-dmenu" },
         { "name": "ghostty", "repoSubpath": "ghostty", "localTarget": "~/.config/ghostty" },
+        { "name": "update-agy", "repoSubpath": "bin/update-agy", "localTarget": "~/.local/bin/update-agy" },
         { "name": "btop", "repoSubpath": "btop", "localTarget": "~/.config/btop" },
         { "name": "gtk-3.0", "repoSubpath": "gtk-3.0", "localTarget": "~/.config/gtk-3.0" },
         { "name": "gtk-4.0", "repoSubpath": "gtk-4.0", "localTarget": "~/.config/gtk-4.0" },

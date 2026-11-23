@@ -154,16 +154,16 @@ def build_parser() -> argparse.ArgumentParser:
             "Usage:\n"
             "  note [<topic>]                 Open wiki hub note (or output to stdout when piped)\n"
             "  note -r [<topic>]              Open raw/<topic>.md (or output to stdout when piped)\n"
-            "  note -a [-t <topic>] <text>    Append timestamped thought to raw/<topic>.md\n"
-            "  ... | note [-t <topic>]        Append piped stdin to raw/<topic>.md\n"
+            "  note -a [-t] <text>            Append timestamped thought to raw/YYYY-MM-DD.md (or fzf-picked topic with -t)\n"
+            "  ... | note [-t]                Append piped stdin to raw/YYYY-MM-DD.md (or fzf-picked topic with -t)\n"
             "  note -l                        List project wiki hubs and raw notes\n"
         ),
     )
     parser.add_argument("tokens", nargs="*", help="Topic name (or thought text when using -a/--add)")
-    parser.add_argument("-a", "--add", action="store_true", help="Append thought to raw/<topic>.md")
+    parser.add_argument("-a", "--add", action="store_true", help="Append thought to raw/YYYY-MM-DD.md (or picked topic with -t)")
     parser.add_argument("-r", "--raw", action="store_true", help="Target raw/<topic>.md")
     parser.add_argument("-l", "--list", action="store_true", help="List project wiki hubs and raw notes")
-    parser.add_argument("-t", "--topic", help="Explicit project/topic name (defaults to current git repo)")
+    parser.add_argument("-t", "--topic", action="store_true", help="Pick target repo/topic interactively with fzf (saves to raw/)")
     parser.add_argument("--obsidian", action="store_true", help="Open note in Obsidian via URI")
     return parser
 
@@ -193,13 +193,24 @@ def main(argv: list[str] | None = None) -> int:
             text = piped_stdin.strip() if piped_stdin.strip() else " ".join(tokens).strip()
             if not text:
                 raise ValueError("Provide note text or pipe stdin: note -a \"thought\"")
-            topic = resolve_topic(args.topic, vault, allow_fzf=False, default_to_date=True)
+            if args.topic:
+                picked = pick_topic_with_fzf(vault)
+                if not picked:
+                    raise ValueError("No topic selected.")
+                topic = sanitize_topic(picked)
+            else:
+                topic = datetime.now().strftime("%Y-%m-%d")
             raw_path = resolve_raw_note(vault, topic)
             append_raw_entry(raw_path, topic, text)
             print(ctext(f"✓ Appended to {raw_path}", "green"))
             return 0
 
-        explicit_topic = args.topic or (" ".join(tokens).strip() if tokens else None)
+        explicit_topic = " ".join(tokens).strip() if tokens else None
+        if args.topic and not explicit_topic:
+            picked = pick_topic_with_fzf(vault)
+            if not picked:
+                raise ValueError("No topic selected.")
+            explicit_topic = picked
         topic = resolve_topic(explicit_topic, vault, allow_fzf=sys.stdout.isatty())
 
         target = resolve_raw_note(vault, topic) if args.raw else resolve_wiki_note(vault, topic)

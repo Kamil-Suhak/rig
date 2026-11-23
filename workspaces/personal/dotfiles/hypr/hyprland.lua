@@ -43,16 +43,6 @@ hl.monitor({
 })
 
 
----------------------
----- MY PROGRAMS ----
----------------------
-
--- Set programs that you use
-local terminal    = "ghostty"
-local fileManager = "ghostty -e yazi"
-local menu        = "~/.config/hypr/scripts/fuzzel-toggle.sh"
-
-
 -------------------
 ---- AUTOSTART ----
 -------------------
@@ -227,8 +217,8 @@ hl.config({
 
 hl.config({
     misc = {
-        force_default_wallpaper = -1,    -- Set to 0 or 1 to disable the anime mascot wallpapers
-        disable_hyprland_logo   = false, -- If true disables the random hyprland logo / anime girl background. :(
+        force_default_wallpaper = 0,    -- Set to 0 or 1 to disable the anime mascot wallpapers
+        disable_hyprland_logo   = true, -- If true disables the random hyprland logo / anime girl background. :(
     },
     render = {
         cm_auto_hdr    = 0,

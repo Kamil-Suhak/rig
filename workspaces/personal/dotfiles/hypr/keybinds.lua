@@ -86,11 +86,11 @@ hl.bind("XF86AudioMicMute",      hl.dsp.exec_cmd("swayosd-client --input-volume 
 hl.bind("XF86MonBrightnessUp",   hl.dsp.exec_cmd("swayosd-client --brightness raise"),          { locked = true, repeating = true }) -- Brightness up
 hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("swayosd-client --brightness lower"),          { locked = true, repeating = true }) -- Brightness down
 
--- Clamshell mode: disable laptop screen when lid closes, re-enable when opened
+-- Disable laptop screen when lid closes, re-enable when opened
 hl.bind("switch:on:Lid Switch",  hl.dsp.exec_cmd("hyprctl keyword monitor \"eDP-1, disable\""),                   { locked = true }) -- Lid closed: disable eDP-1
 hl.bind("switch:off:Lid Switch", hl.dsp.exec_cmd("hyprctl keyword monitor \"eDP-1, 1920x1080@60, 384x1152, 1.5\""), { locked = true }) -- Lid opened: enable eDP-1
 
--- Media playback (playerctl)
+-- Media playback
 hl.bind("XF86AudioNext",  hl.dsp.exec_cmd("playerctl next"),       { locked = true }) -- Next track
 hl.bind("XF86AudioPause", hl.dsp.exec_cmd("playerctl play-pause"), { locked = true }) -- Play/pause media
 hl.bind("XF86AudioPlay",  hl.dsp.exec_cmd("playerctl play-pause"), { locked = true }) -- Play/pause media

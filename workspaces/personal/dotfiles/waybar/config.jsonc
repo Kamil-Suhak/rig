@@ -10,25 +10,25 @@
     "spacing": 6,
     "modules-left": ["hyprland/workspaces", "hyprland/window"],
     "modules-center": ["clock"],
-    "modules-right": ["idle_inhibitor", "pulseaudio", "bluetooth", "network", "battery", "tray"],
+    "modules-right": ["pulseaudio", "bluetooth", "network", "custom/power-mode", "battery", "tray"],
     "hyprland/window": {
       "format": "{title}",
       "max-length": 45,
       "separate-outputs": true
     },
-    "idle_inhibitor": {
-      "format": "{icon}",
-      "format-icons": { "activated": "󰅶", "deactivated": "󰾪" },
-      "tooltip": true,
-      "tooltip-format-activated": "Keep awake: ON",
-      "tooltip-format-deactivated": "Keep awake: OFF"
+    "custom/power-mode": {
+      "exec": "~/.config/hypr/scripts/power-mode.sh status",
+      "return-type": "json",
+      "interval": 10,
+      "signal": 8,
+      "on-click": "~/.config/hypr/scripts/waybar-menu.sh power"
     },
     "bluetooth": {
       "format": "󰂯",
       "format-connected": "󰂱 {device_alias}",
       "format-off": "󰂲",
       "tooltip-format": "{controller_alias}\t{status}",
-      "on-click": "ghostty --class=com.bluetui.float -e bluetui"
+      "on-click": "~/.config/hypr/scripts/waybar-menu.sh bluetooth"
     },
     "hyprland/workspaces": {
       "format": "{id}",
@@ -37,8 +37,7 @@
     },
     "clock": {
       "format": "{:%a %d %b  %H:%M}",
-      "tooltip": false,
-      "on-click": "pkill -x waycal || waycal"
+      "tooltip-format": "<tt>{calendar}</tt>"
     },
     "pulseaudio": {
       "format": "󰕾 {volume}%",
@@ -51,7 +50,7 @@
       "format-ethernet": "󰈀 {ifname}",
       "format-disconnected": "󰤭 offline",
       "tooltip-format": "{ipaddr}/{cidr} ({signalStrength}%)",
-      "on-click": "networkmanager_dmenu"
+      "on-click": "~/.config/hypr/scripts/waybar-menu.sh wifi"
     },
     "battery": {
       "states": { "warning": 25, "critical": 12 },
@@ -73,25 +72,25 @@
     "spacing": 6,
     "modules-left": ["hyprland/workspaces", "hyprland/window"],
     "modules-center": ["clock"],
-    "modules-right": ["idle_inhibitor", "pulseaudio", "bluetooth", "network", "battery", "tray"],
+    "modules-right": ["pulseaudio", "bluetooth", "network", "custom/power-mode", "battery", "tray"],
     "hyprland/window": {
       "format": "{title}",
       "max-length": 45,
       "separate-outputs": true
     },
-    "idle_inhibitor": {
-      "format": "{icon}",
-      "format-icons": { "activated": "󰅶", "deactivated": "󰾪" },
-      "tooltip": true,
-      "tooltip-format-activated": "Keep awake: ON (sleep and lock paused)",
-      "tooltip-format-deactivated": "Keep awake: OFF (normal sleep and lock)"
+    "custom/power-mode": {
+      "exec": "~/.config/hypr/scripts/power-mode.sh status",
+      "return-type": "json",
+      "interval": 10,
+      "signal": 8,
+      "on-click": "~/.config/hypr/scripts/waybar-menu.sh power"
     },
     "bluetooth": {
       "format": "󰂯",
       "format-connected": "󰂱 {device_alias}",
       "format-off": "󰂲",
       "tooltip-format": "{controller_alias}\t{status}",
-      "on-click": "ghostty --class=com.bluetui.float -e bluetui"
+      "on-click": "~/.config/hypr/scripts/waybar-menu.sh bluetooth"
     },
     "hyprland/workspaces": {
       "format": "{id}",
@@ -100,8 +99,7 @@
     },
     "clock": {
       "format": "{:%a %d %b  %H:%M}",
-      "tooltip": false,
-      "on-click": "pkill -x waycal || waycal"
+      "tooltip-format": "<tt>{calendar}</tt>"
     },
     "pulseaudio": {
       "format": "󰕾 {volume}%",
@@ -114,7 +112,7 @@
       "format-ethernet": "󰈀 {ifname}",
       "format-disconnected": "󰤭 offline",
       "tooltip-format": "{ipaddr}/{cidr} ({signalStrength}%)",
-      "on-click": "networkmanager_dmenu"
+      "on-click": "~/.config/hypr/scripts/waybar-menu.sh wifi"
     },
     "battery": {
       "states": { "warning": 25, "critical": 12 },

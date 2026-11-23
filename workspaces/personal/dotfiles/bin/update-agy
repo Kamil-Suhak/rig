@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+pkg_dir="${1:-$HOME/code/agy-downloads/antigravity-cli}"
+pkgbuild="$pkg_dir/PKGBUILD"
+
+if [[ ! -f "$pkgbuild" ]]; then
+  echo "PKGBUILD not found at: $pkgbuild" >&2
+  echo "Move your antigravity-cli folder to $HOME/.local/src/antigravity-cli or pass its path as an argument." >&2
+  exit 1
+fi
+
+latest="$(gh release view --repo google-antigravity/antigravity-cli --json tagName -q .tagName)"
+latest="${latest#v}"
+
+current="$(sed -n 's/^pkgver=//p' "$pkgbuild" | head -n1)"
+if [[ "$current" == "$latest" ]] && pacman -Q antigravity-cli 2>/dev/null | grep -q " $latest-"; then
+  echo "antigravity-cli is already up to date ($latest)"
+  exit 0
+fi
+
+echo "Updating antigravity-cli: $current -> $latest"
+sed -i "s/^pkgver=.*/pkgver=${latest}/" "$pkgbuild"
+sed -i "s/^pkgrel=.*/pkgrel=1/" "$pkgbuild"
+
+cd "$pkg_dir"
+updpkgsums
+makepkg -si
+
+if pgrep -f "agy remote-control" >/dev/null 2>&1; then
+  echo "Restarting agy remote-control..."
+  pkill -f "agy remote-control" || true
+  sleep 0.5
+  setsid -f agy remote-control >/dev/null 2>&1
+fi

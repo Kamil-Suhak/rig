@@ -56,7 +56,7 @@ window#waybar {
   color: #e5c07b;
 }
 
-#idle_inhibitor,
+#custom-power-mode,
 #pulseaudio,
 #bluetooth,
 #network,
@@ -68,8 +68,16 @@ window#waybar {
   background: rgba(33, 37, 43, 0.65);
 }
 
-#idle_inhibitor.activated {
+#custom-power-mode.low {
+  color: #98c379;
+}
+
+#custom-power-mode.high {
   color: #e5c07b;
+}
+
+#custom-power-mode.server {
+  color: #c678dd;
 }
 
 #bluetooth.connected {

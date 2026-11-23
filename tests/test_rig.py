@@ -967,15 +967,17 @@ class TestWorkset(unittest.TestCase):
 
             env = {"RIG_NOTES_VAULT": str(vault), "RIG_WORKSPACE": "personal"}
 
-            # Append raw thought via `note -a`
+            # Append raw thought via `note -a` inside a git repo — still defaults to YYYY-MM-DD.md
+            from datetime import datetime
+            today_str = datetime.now().strftime("%Y-%m-%d")
             r_add = run_cli(BIN_DIR / "note", ["-a", "state machine bug on retry"], cwd=repo, env=env)
             self.assertEqual(r_add.returncode, 0, r_add.stderr)
-            raw_file = vault / "raw" / "state-machine-app.md"
+            raw_file = vault / "raw" / f"{today_str}.md"
             self.assertTrue(raw_file.is_file())
             self.assertIn("state machine bug on retry", raw_file.read_text(encoding="utf-8"))
 
-            # Piped `note -r` emits raw file content to stdout (no --cat needed)
-            r_raw = run_cli(BIN_DIR / "note", ["-r"], cwd=repo, env=env)
+            # Piped `note -r <topic>` emits raw file content to stdout (no --cat needed)
+            r_raw = run_cli(BIN_DIR / "note", ["-r", today_str], cwd=repo, env=env)
             self.assertEqual(r_raw.returncode, 0, r_raw.stderr)
             self.assertIn("state machine bug on retry", r_raw.stdout)
 
@@ -990,18 +992,15 @@ class TestWorkset(unittest.TestCase):
             # `note -l` includes both topics
             r_list = run_cli(BIN_DIR / "note", ["-l"], env=env)
             self.assertEqual(r_list.returncode, 0, r_list.stderr)
-            self.assertIn("state-machine-app", r_list.stdout)
+            self.assertIn(today_str, r_list.stdout)
             self.assertIn("state-machine-bug", r_list.stdout)
 
-            # `note -a` outside a git repo defaults to YYYY-MM-DD.md
+            # `note -a` outside a git repo also defaults to YYYY-MM-DD.md
             non_repo = tpath / "not-a-repo"
             non_repo.mkdir()
             r_date_add = run_cli(BIN_DIR / "note", ["-a", "quick stray thought"], cwd=non_repo, env=env)
             self.assertEqual(r_date_add.returncode, 0, r_date_add.stderr)
-            from datetime import datetime
-            today_raw = vault / "raw" / f"{datetime.now().strftime('%Y-%m-%d')}.md"
-            self.assertTrue(today_raw.is_file())
-            self.assertIn("quick stray thought", today_raw.read_text(encoding="utf-8"))
+            self.assertIn("quick stray thought", raw_file.read_text(encoding="utf-8"))
 
 
 class TestZshFunctionsViaBash(unittest.TestCase):

@@ -1,11 +1,7 @@
 {
   "entries": [
     {
-      "path": "{REPO}/configs/skills"
-    },
-    {
       "path": "~/.agents/skills"
     }
   ]
 }
-

@@ -22,7 +22,7 @@ This skill encapsulates the developer's architectural philosophy, coding standar
    - Code written simply is valid, but when a new feature causes it to outgrow its original design, **never glue changes onto code that wasn't built to hold them**.
    - If an edit requires hacky workarounds or compromises the foundation, **flag the tension immediately** and propose restructuring the foundation before implementing the feature.
 3. **Commit Formatting**:
-   - Format: `<type>: <description>` (no scope parentheses, lowercase, imperative, under 72 chars).
+   - Format: `<type>: <description>` (no scope parentheses, lowercase, imperative, under 100 chars).
    - Valid types: `docs`, `refactor`, `chore`, `test`, `feat`, `fix`, `visual`.
 4. **Code Quality**:
    - Prefer pure functions, explicit parameter passing, and typed domain errors over implicit state or unhandled exceptions.

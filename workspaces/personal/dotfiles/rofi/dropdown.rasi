@@ -1,0 +1,18 @@
+@import "config.rasi"
+
+configuration {
+    show-icons: false;
+}
+
+window {
+    location: northeast;
+    anchor: northeast;
+    x-offset: -12px;
+    y-offset: 8px;
+    width: 400px;
+    padding: 12px;
+}
+
+listview {
+    lines: 10;
+}

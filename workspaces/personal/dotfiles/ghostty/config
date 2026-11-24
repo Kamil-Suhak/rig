@@ -14,7 +14,7 @@ window-padding-y = 8
 window-decoration = auto
 
 # Quality of life
-command = ~/.local/bin/pty-ring /usr/bin/zsh
+command = /usr/bin/sh -c 'if [ -x "$HOME/.local/bin/pty-ring" ]; then exec "$HOME/.local/bin/pty-ring" /usr/bin/zsh; else exec /usr/bin/zsh; fi'
 shell-integration = zsh
 mouse-hide-while-typing = true
 confirm-close-surface = false

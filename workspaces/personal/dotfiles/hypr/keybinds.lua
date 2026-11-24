@@ -1,6 +1,6 @@
 local terminal = "ghostty"
 local fileManager = "ghostty -e yazi"
-local menu = "~/.config/hypr/scripts/fuzzel-toggle.sh"
+local menu = "~/.config/hypr/scripts/rofi-toggle.sh -show drun"
 
 ---------------------
 
@@ -11,10 +11,9 @@ hl.bind(mainMod .. " + Return", hl.dsp.exec_cmd(terminal)) -- Open terminal (Gho
 hl.bind(mainMod .. " + T",      hl.dsp.exec_cmd(terminal)) -- Open terminal (Ghostty)
 local closeWindowBind = hl.bind(mainMod .. " + X", hl.dsp.window.close()) -- Close active window
 -- closeWindowBind:set_enabled(false)
-hl.bind(mainMod .. " + M", hl.dsp.exec_cmd("command -v hyprshutdown >/dev/null 2>&1 && hyprshutdown || hyprctl dispatch 'hl.dsp.exit()'")) -- Exit Hyprland
 hl.bind(mainMod .. " + F", hl.dsp.exec_cmd(fileManager)) -- Open file manager (Yazi)
 hl.bind(mainMod .. " + V", hl.dsp.window.float({ action = "toggle" })) -- Toggle floating window
-hl.bind(mainMod .. " + R", hl.dsp.exec_cmd(menu)) -- App launcher (Fuzzel)
+hl.bind(mainMod .. " + R", hl.dsp.exec_cmd(menu)) -- App launcher (Rofi)
 hl.bind(mainMod .. " + L", hl.dsp.exec_cmd("hyprlock")) -- Lock screen
 hl.bind(mainMod .. " + P", hl.dsp.window.pseudo()) -- Toggle pseudotile
 hl.bind(mainMod .. " + J", hl.dsp.layout("togglesplit")) -- Toggle split orientation (dwindle)
@@ -86,9 +85,9 @@ hl.bind("XF86AudioMicMute",      hl.dsp.exec_cmd("swayosd-client --input-volume 
 hl.bind("XF86MonBrightnessUp",   hl.dsp.exec_cmd("swayosd-client --brightness raise"),          { locked = true, repeating = true }) -- Brightness up
 hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("swayosd-client --brightness lower"),          { locked = true, repeating = true }) -- Brightness down
 
--- Disable laptop screen when lid closes, re-enable when opened
-hl.bind("switch:on:Lid Switch",  hl.dsp.exec_cmd("hyprctl keyword monitor \"eDP-1, disable\""),                   { locked = true }) -- Lid closed: disable eDP-1
-hl.bind("switch:off:Lid Switch", hl.dsp.exec_cmd("hyprctl keyword monitor \"eDP-1, 1920x1080@60, 384x1152, 1.5\""), { locked = true }) -- Lid opened: enable eDP-1
+-- Clamshell / lid switch handling
+hl.bind("switch:on:Lid Switch",  hl.dsp.exec_cmd("~/.config/hypr/scripts/lid-switch.sh close"), { locked = true })
+hl.bind("switch:off:Lid Switch", hl.dsp.exec_cmd("~/.config/hypr/scripts/lid-switch.sh open"),  { locked = true })
 
 -- Media playback
 hl.bind("XF86AudioNext",  hl.dsp.exec_cmd("playerctl next"),       { locked = true }) -- Next track

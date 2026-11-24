@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-text=$("$HOME/.config/hypr/scripts/fuzzel-toggle.sh" --dmenu --prompt-only="Note: " --width=60) || exit 0
+text=$("$HOME/.config/hypr/scripts/rofi-toggle.sh" -dmenu -p "Note: " -l 0 -theme-str 'window { width: 640px; } listview { enabled: false; } entry { placeholder: ""; }') || exit 0
 [ -n "${text// }" ] || exit 0
 
 if out=$("$HOME/code/projects/rig/configs/bin/note" -a "$text" 2>&1); then

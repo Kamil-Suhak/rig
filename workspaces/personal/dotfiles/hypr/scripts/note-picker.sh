@@ -24,7 +24,7 @@ for f in "${files[@]}"; do
   fi
 done
 
-idx=$(printf '%s' "$menu" | "$HOME/.config/hypr/scripts/fuzzel-toggle.sh" --dmenu --index --cache=/dev/null --prompt="raw> " --width=70) || exit 0
+idx=$(printf '%s' "$menu" | "$HOME/.config/hypr/scripts/rofi-toggle.sh" -dmenu -format i -i -p "raw> " -theme-str "window { width: 760px; }") || exit 0
 [ -n "$idx" ] || exit 0
 
 chosen="$(basename "${files[$idx]}" .md)"

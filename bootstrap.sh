@@ -57,7 +57,7 @@ if command -v pacman >/dev/null 2>&1; then
     if [ -n "$missing_base" ]; then
         echo ">>> Installing base prerequisites via pacman:$missing_base"
         # shellcheck disable=SC2086
-        run_privileged pacman -Sy --needed --noconfirm $missing_base
+        run_privileged pacman -Syu --needed --noconfirm $missing_base
     fi
 fi
 

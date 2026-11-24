@@ -320,6 +320,13 @@ hl.window_rule({
 --     match = { namespace = "^my-overlay$" },
 --     no_anim = true,
 -- })
+
+hl.layer_rule({
+    name      = "rofi-anim",
+    match     = { namespace = "^rofi$" },
+    animation = "slide top",
+    blur      = false,
+})
 -- overlayLayerRule:set_enabled(false)
 
 -- Hyprland-run windowrule

@@ -27,4 +27,4 @@ for line in text.splitlines():
 PY
 )
 
-printf '%s\n' "$list" | "$HOME/.config/hypr/scripts/fuzzel-toggle.sh" --dmenu --cache=/dev/null --prompt="keys> " --width=80 >/dev/null || true
+printf '%s\n' "$list" | "$HOME/.config/hypr/scripts/rofi-toggle.sh" -dmenu -i -p "keys> " -theme-str "window { width: 820px; }" >/dev/null || true

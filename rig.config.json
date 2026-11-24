@@ -139,12 +139,6 @@
       "category": "Shell"
     },
     {
-      "id": "ZshAutocomplete",
-      "arch": "zsh-autocomplete",
-      "name": "Zsh Autocomplete",
-      "category": "Shell"
-    },
-    {
       "id": "Fzf",
       "arch": "fzf",
       "apt": "fzf",
@@ -443,9 +437,9 @@
       "workspaces": ["personal"]
     },
     {
-      "id": "Fuzzel",
-      "arch": "fuzzel",
-      "name": "Fuzzel Launcher",
+      "id": "Rofi",
+      "arch": "rofi",
+      "name": "Rofi Launcher",
       "category": "Desktop",
       "workspaces": ["personal"],
       "gui": true
@@ -565,6 +559,60 @@
       "arch": "lazygit",
       "name": "lazygit",
       "category": "Dev Tools"
+    },
+    {
+      "id": "Swayosd",
+      "arch": "swayosd",
+      "name": "SwayOSD",
+      "category": "Desktop",
+      "workspaces": ["personal"],
+      "gui": true
+    },
+    {
+      "id": "Bluetui",
+      "arch": "bluetui",
+      "name": "bluetui",
+      "category": "Utilities",
+      "workspaces": ["personal"]
+    },
+    {
+      "id": "Waycal",
+      "arch": "waycal",
+      "name": "waycal",
+      "category": "Desktop",
+      "workspaces": ["personal"],
+      "gui": true
+    },
+    {
+      "id": "NwgLook",
+      "arch": "nwg-look",
+      "name": "nwg-look",
+      "category": "Desktop",
+      "workspaces": ["personal"],
+      "gui": true
+    },
+    {
+      "id": "ArcGtkTheme",
+      "arch": "arc-gtk-theme",
+      "name": "Arc GTK Theme",
+      "category": "Desktop",
+      "workspaces": ["personal"],
+      "gui": true
+    },
+    {
+      "id": "QogirCursorTheme",
+      "arch": "qogir-cursor-theme",
+      "name": "Qogir Cursor Theme",
+      "category": "Desktop",
+      "workspaces": ["personal"],
+      "gui": true
+    },
+    {
+      "id": "BluezUtils",
+      "arch": "bluez-utils",
+      "name": "BlueZ Utils (bluetoothctl)",
+      "category": "Utilities",
+      "workspaces": ["personal"]
     }
   ],
   "fonts": [
@@ -645,9 +693,7 @@
       "displayName": "AI Plugins",
       "repoDir": "configs/plugins",
       "targetDir": "~/.gemini/config/plugins",
-      "items": [
-        "egm"
-      ]
+      "items": []
     },
     "dotfiles": {
       "displayName": "Desktop Dotfiles",
@@ -655,7 +701,8 @@
       "links": [
         { "name": "hypr", "repoSubpath": "hypr", "localTarget": "~/.config/hypr" },
         { "name": "waybar", "repoSubpath": "waybar", "localTarget": "~/.config/waybar" },
-        { "name": "fuzzel", "repoSubpath": "fuzzel", "localTarget": "~/.config/fuzzel" },
+        { "name": "rofi", "repoSubpath": "rofi", "localTarget": "~/.config/rofi" },
+        { "name": "rofi", "repoSubpath": "rofi", "localTarget": "~/.config/rofi" },
         { "name": "mako", "repoSubpath": "mako", "localTarget": "~/.config/mako" },
         { "name": "mdcat", "repoSubpath": "mdcat", "localTarget": "~/.config/mdcat" },
         { "name": "micro", "repoSubpath": "micro", "localTarget": "~/.config/micro" },

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fuzzel conversation picker for Antigravity CLI ('agy') sessions."""
+"""Rofi conversation picker for Antigravity CLI ('agy') sessions."""
 
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ def load_conversations(cli_dir: Path, *, limit: int = 50) -> list[dict[str, str]
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="agy-picker", description="Pick an agy CLI conversation via fuzzel and launch it in Ghostty.")
+    parser = argparse.ArgumentParser(prog="agy-picker", description="Pick an agy CLI conversation via rofi and launch it in Ghostty.")
     parser.add_argument("--ask", action="store_true", help="Pick from isolated ask-home rolling sessions instead of main agy CLI history")
     parser.add_argument("--list", action="store_true", help="Print formatted conversation entries and exit")
     parser.add_argument("--dry-run", action="store_true", help="Print the selected launch command instead of executing")
@@ -105,15 +105,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{item['id']}\t{item['cwd']}\t{item['display']}")
         return 0
 
-    toggle_script = Path.home() / ".config" / "hypr" / "scripts" / "fuzzel-toggle.sh"
-    fuzzel = str(toggle_script) if toggle_script.is_file() else shutil.which("fuzzel")
-    if not fuzzel:
-        print("✖ agy-picker: 'fuzzel' not found in PATH.", file=sys.stderr)
+    toggle_script = Path.home() / ".config" / "hypr" / "scripts" / "rofi-toggle.sh"
+    rofi = str(toggle_script) if toggle_script.is_file() else shutil.which("rofi")
+    if not rofi:
+        print("✖ agy-picker: 'rofi' not found in PATH.", file=sys.stderr)
         return 1
 
     menu_input = "\n".join(item["display"] for item in items)
     res = subprocess.run(
-        [fuzzel, "--dmenu", "--index", "--cache=/dev/null", f"--prompt={prompt_label}", "--width=75"],
+        [rofi, "-dmenu", "-format", "i", "-i", "-p", prompt_label, "-theme-str", "window { width: 820px; }"],
         input=menu_input,
         text=True,
         capture_output=True,

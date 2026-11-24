@@ -515,29 +515,34 @@ def cmd_build_prompt(args: argparse.Namespace) -> int:
     return 0
 
 
-def ensure_ask_home(ask_home: Path, real_home: Path) -> None:
-    """Create minimal isolated ask-home with dedicated ASK.md and settings.json."""
-    ask_gemini = ask_home / ".gemini"
-    ask_gemini.mkdir(parents=True, exist_ok=True)
-
-    ask_md = Path(__file__).resolve().parent.parent / "gemini" / "ASK.md"
-    dst_gemini_md = ask_gemini / "GEMINI.md"
-    if ask_md.is_file():
-        if dst_gemini_md.is_symlink() and dst_gemini_md.resolve() != ask_md.resolve():
-            dst_gemini_md.unlink()
-        if not dst_gemini_md.exists() and not dst_gemini_md.is_symlink():
-            try:
-                dst_gemini_md.symlink_to(ask_md)
-            except OSError:
-                pass
-
-    src_settings = real_home / ".gemini" / "settings.json"
-    dst_settings = ask_gemini / "settings.json"
-    if src_settings.exists() and not dst_settings.exists() and not dst_settings.is_symlink():
+def _ensure_symlink(src: Path, dst: Path) -> None:
+    if not (src.exists() or src.is_symlink()):
+        return
+    if dst.is_symlink() and dst.resolve() != src.resolve():
+        dst.unlink()
+    if not dst.exists() and not dst.is_symlink():
         try:
-            dst_settings.symlink_to(src_settings)
+            dst.symlink_to(src)
         except OSError:
             pass
+
+
+def ensure_ask_home(ask_home: Path, real_home: Path, engine: str = "agy") -> None:
+    """Create minimal isolated ask-home with dedicated ASK.md instructions and config."""
+    ask_md = Path(__file__).resolve().parent.parent / "gemini" / "ASK.md"
+
+    if engine == "copilot":
+        ask_copilot = ask_home / ".copilot"
+        ask_copilot.mkdir(parents=True, exist_ok=True)
+        _ensure_symlink(ask_md, ask_copilot / "copilot-instructions.md")
+        for cfg_name in ("config.json", "settings.json"):
+            _ensure_symlink(real_home / ".copilot" / cfg_name, ask_copilot / cfg_name)
+        return
+
+    ask_gemini = ask_home / ".gemini"
+    ask_gemini.mkdir(parents=True, exist_ok=True)
+    _ensure_symlink(ask_md, ask_gemini / "GEMINI.md")
+    _ensure_symlink(real_home / ".gemini" / "settings.json", ask_gemini / "settings.json")
 
 
 def _decide_keep_or_prune(prompt_preview: str) -> str:
@@ -605,6 +610,41 @@ def prune_ask_home(ask_home: Path, *, max_keep: int = 15) -> None:
         pass
 
 
+def _load_local_workset_context(cwd: str) -> tuple[str, str] | None:
+    """Load non-empty active workset context for cwd via 'workset --context-json'."""
+    ws_bin = Path(__file__).resolve().parent / "workset"
+    if not ws_bin.is_file():
+        return None
+    try:
+        res = subprocess.run(
+            [sys.executable, str(ws_bin), "--context-json"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if res.returncode != 0 or not res.stdout.strip():
+        return None
+    try:
+        data = json.loads(res.stdout)
+    except ValueError:
+        return None
+    name = str(data.get("name") or "").strip()
+    files = [str(f).strip() for f in (data.get("files") or []) if str(f).strip()]
+    overview = str(data.get("overview") or "").strip()
+    if not name or (not files and not overview):
+        return None
+    parts: list[str] = [f"[Workset Context: {name}]"]
+    if files:
+        parts.append("Files:\n" + "\n".join(f"- {f}" for f in files))
+    if overview:
+        parts.append(f"Overview & WIP:\n{overview}")
+    return name, "\n\n".join(parts)
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     if args.reply and args.local:
         print(_ce(sys.stderr, "✖ ask: cannot combine -r/--reply with --local; -r inherits the conversation's original directory.", "red"), file=sys.stderr)
@@ -614,7 +654,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 2
 
     real_home = Path.home()
-    use_ask_home = args.engine == "agy" and not os.environ.get("RIG_AGY_CLI_DIR") and not args.keep_history
+    use_ask_home = not (args.engine == "agy" and os.environ.get("RIG_AGY_CLI_DIR")) and not args.keep_history
     ask_home = Path(os.environ.get("RIG_ASK_HOME") or (real_home / ".local" / "share" / "ask-home")).expanduser()
 
     default_bin = "agy" if args.engine == "agy" else "copilot"
@@ -623,11 +663,16 @@ def cmd_run(args: argparse.Namespace) -> int:
         print(_ce(sys.stderr, f"✖ ask: '{default_bin}' CLI not found in PATH.", "red"), file=sys.stderr)
         return 1
 
+    def _isolated_env() -> dict[str, str]:
+        env_map = dict(os.environ)
+        if args.engine == "copilot":
+            env_map["COPILOT_HOME"] = str(ask_home / ".copilot")
+        else:
+            env_map["HOME"] = str(ask_home)
+        return env_map
+
     if args.continue_interactive:
-        if args.engine != "agy":
-            print(_ce(sys.stderr, "✖ ask: -c/--continue is only supported with the 'agy' engine.", "red"), file=sys.stderr)
-            return 2
-        ensure_ask_home(ask_home, real_home)
+        ensure_ask_home(ask_home, real_home, args.engine)
         last_file = ask_home / "last.json"
         if not last_file.is_file():
             print(_ce(sys.stderr, "✖ ask: no previous 'ask' conversation found to continue.", "red"), file=sys.stderr)
@@ -637,14 +682,17 @@ def cmd_run(args: argparse.Namespace) -> int:
         except (OSError, ValueError):
             last_meta = {}
         last_id = str(last_meta.get("id") or "").strip()
-        if not last_id:
+        if not last_id and args.engine == "agy":
             print(_ce(sys.stderr, "✖ ask: last conversation ID is missing.", "red"), file=sys.stderr)
             return 1
         saved_cwd = str(last_meta.get("cwd") or ask_home)
         target_cwd = saved_cwd if Path(saved_cwd).is_dir() else str(ask_home)
-        isolated_env = dict(os.environ)
-        isolated_env["HOME"] = str(ask_home)
-        return subprocess.run([exe, "--conversation", last_id], cwd=target_cwd, env=isolated_env, check=False).returncode
+        if args.engine == "copilot":
+            cont_cmd = [exe, "--config-dir", str(ask_home / ".copilot")]
+            cont_cmd.extend(["--resume", last_id] if last_id else ["--continue"])
+        else:
+            cont_cmd = [exe, "--conversation", last_id]
+        return subprocess.run(cont_cmd, cwd=target_cwd, env=_isolated_env(), check=False).returncode
 
     piped = sys.stdin.read() if not sys.stdin.isatty() else ""
     if args.preamble is not None:
@@ -666,17 +714,23 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 2
 
     if not full_prompt:
-        print(_ce(sys.stderr, "Usage: ask [--ctx [<n>|~<n>|~<a>..<b>]] [--high] [--local] [-r] [-c] [--keep-history] <question>", "yellow"), file=sys.stderr)
+        print(_ce(sys.stderr, "Usage: ask [--ctx [<n>|@<n>|<a>..<b>]] [--high] [--local] [-r] [-c] [--keep-history] <question>", "yellow"), file=sys.stderr)
         return 1
 
-    if args.engine == "copilot":
-        code, _ = stream_ask_process(exe, ["-p", full_prompt], "copilot", stream_json=False)
-        return code
+    if args.local and not args.reply and not args.continue_interactive:
+        ws_ctx = _load_local_workset_context(os.getcwd())
+        if ws_ctx:
+            ws_name, ws_text = ws_ctx
+            print(_ce(sys.stderr, f"ℹ Loaded workset: {ws_name}", "cyan"), file=sys.stderr)
+            full_prompt = f"{ws_text}\n\n{full_prompt}"
 
     model = "gemini-4-hydrogen-high" if args.high else "gemini-4-hydrogen-low"
 
     # Preserve legacy RIG_AGY_CLI_DIR test mode or explicit --keep-history in main ~/.gemini/antigravity-cli
     if not use_ask_home:
+        if args.engine == "copilot":
+            code, _ = stream_ask_process(exe, ["-s", "-p", full_prompt], "copilot", stream_json=False)
+            return code
         cli_dir = Path(os.environ.get("RIG_AGY_CLI_DIR") or (real_home / ".gemini" / "antigravity-cli")).expanduser()
         conv_dir = cli_dir / "conversations"
         brain_dir = cli_dir / "brain"
@@ -700,10 +754,20 @@ def cmd_run(args: argparse.Namespace) -> int:
             remove_agy_conversation(cli_dir, new_ids)
         return code
 
-    ensure_ask_home(ask_home, real_home)
+    ensure_ask_home(ask_home, real_home, args.engine)
     last_file = ask_home / "last.json"
 
-    agy_args = ["--disable-slash-commands", "--model", model, "--output-format", "stream-json", "-p", full_prompt]
+    if args.engine == "copilot":
+        cli_args = ["--config-dir", str(ask_home / ".copilot"), "-s", "-p", full_prompt]
+        stream_json = False
+        label = "copilot"
+    else:
+        cli_args = ["--disable-slash-commands", "--output-format", "stream-json", "-p", full_prompt]
+        if not args.reply:
+            cli_args = ["--model", model, *cli_args]
+        stream_json = True
+        label = "resume" if args.reply else model
+
     if args.reply:
         if not last_file.is_file():
             print(_ce(sys.stderr, "✖ ask: no previous 'ask' conversation found to resume.", "red"), file=sys.stderr)
@@ -713,38 +777,45 @@ def cmd_run(args: argparse.Namespace) -> int:
         except (OSError, ValueError):
             last_meta = {}
         last_id = str(last_meta.get("id") or "").strip()
-        if not last_id:
+        if not last_id and args.engine == "agy":
             print(_ce(sys.stderr, "✖ ask: last conversation ID is missing.", "red"), file=sys.stderr)
             return 1
         saved_cwd = str(last_meta.get("cwd") or ask_home)
         target_cwd = saved_cwd if Path(saved_cwd).is_dir() else str(ask_home)
-        agy_args = ["--conversation", last_id, *agy_args]
+        if args.engine == "copilot":
+            cli_args = ["--resume", last_id, *cli_args] if last_id else ["--continue", *cli_args]
+        else:
+            cli_args = ["--conversation", last_id, *cli_args]
     else:
         target_cwd = os.getcwd() if args.local else str(ask_home)
 
-    isolated_env = dict(os.environ)
-    isolated_env["HOME"] = str(ask_home)
-
     code, conv_id = stream_ask_process(
         exe,
-        agy_args,
-        model,
-        stream_json=True,
+        cli_args,
+        label,
+        stream_json=stream_json,
         cwd=target_cwd,
-        env=isolated_env,
+        env=_isolated_env(),
     )
 
-    if code == 0 and conv_id:
+    if code == 0 and (conv_id or args.engine == "copilot"):
         try:
-            last_file.write_text(json.dumps({"id": conv_id, "cwd": target_cwd}, indent=2) + "\n", encoding="utf-8")
-            index_path = ask_home / "index.json"
-            index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.is_file() else {}
-            preview = " ".join(args.query).strip()[:200] or full_prompt[:200]
-            index[conv_id] = {"cwd": target_cwd, "preview": preview, "ts": int(time.time())}
-            index_path.write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
-            prune_ask_home(ask_home)
+            last_file.write_text(json.dumps({"id": conv_id or "", "cwd": target_cwd}, indent=2) + "\n", encoding="utf-8")
+            if conv_id:
+                index_path = ask_home / "index.json"
+                index = json.loads(index_path.read_text(encoding="utf-8")) if index_path.is_file() else {}
+                preview = " ".join(args.query).strip()[:200] or full_prompt[:200]
+                index[conv_id] = {"cwd": target_cwd, "preview": preview, "ts": int(time.time())}
+                index_path.write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
+                prune_ask_home(ask_home)
         except OSError:
             pass
+
+    if code == 0:
+        hints = ["Follow-up: ask -r '<prompt>'", "Interactive: ask -c"]
+        if not args.local and not args.reply:
+            hints.append("Repo context: ask --local")
+        print(_ce(sys.stderr, "  ↳ " + "  ·  ".join(hints), "darkgray"), file=sys.stderr)
 
     return code
 

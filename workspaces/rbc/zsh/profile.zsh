@@ -3,6 +3,7 @@
 # @cmd: optify-issues — List or interactively pick assigned OptifyRequirements project issues
 optify-issues() {
     local pick=0
+    local start=0
     local show_all=0
     local status_filter=""
     local backend_filter=""
@@ -16,6 +17,7 @@ Usage: optify-issues [options]
 List issues assigned to you in the OptifyRequirements GitHub Project (default: backendStatus != Ready).
 Options:
   -i, --pick            Pick an issue interactively with fzf and run 'gh issue view'
+  -s, --start           Pick an issue + local repo, create branch, and run 'workset new'
   -a, --all             Include issues where backendStatus is Ready
   --status <text>       Filter by board status (case-insensitive substring)
   --backend <text>      Filter by backendStatus (case-insensitive substring)
@@ -24,6 +26,11 @@ EOF
                 return 0
                 ;;
             -i|--pick)
+                pick=1
+                shift
+                ;;
+            -s|--start)
+                start=1
                 pick=1
                 shift
                 ;;
@@ -99,11 +106,74 @@ EOF
         num="${num#\#}"
         [ -z "$num" ] && return 0
         repo="$(printf '%s' "$raw_json" | jq -r --argjson n "$num" '.items[] | select(.content.number == $n) | .content.repository // empty' | head -n 1)"
-        if [ -n "$repo" ]; then
-            gh issue view "$num" -R "$repo"
-        else
-            gh issue view "$num"
+        if [ "$start" -eq 0 ]; then
+            if [ -n "$repo" ]; then
+                gh issue view "$num" -R "$repo"
+            else
+                gh issue view "$num"
+            fi
+            return $?
         fi
+
+        local issue_json issue_url issue_title issue_body
+        if [ -n "$repo" ]; then
+            issue_json="$(gh issue view "$num" -R "$repo" --json title,body,url)" || return 1
+        else
+            issue_json="$(gh issue view "$num" --json title,body,url)" || return 1
+        fi
+        issue_url="$(printf '%s' "$issue_json" | jq -r '.url // empty')"
+        issue_title="$(printf '%s' "$issue_json" | jq -r '.title // empty')"
+        issue_body="$(printf '%s' "$issue_json" | jq -r '.body // empty')"
+
+        local roots_file="${RIG_PROJECT_ROOTS:-$HOME/.local/state/rig/project-roots}"
+        local -a repo_candidates=()
+        local root_dir sub_dir
+        if [ -f "$roots_file" ]; then
+            while IFS= read -r root_dir; do
+                root_dir="${root_dir%%#*}"
+                root_dir="${root_dir#"${root_dir%%[![:space:]]*}"}"
+                root_dir="${root_dir%"${root_dir##*[![:space:]]}"}"
+                [ -z "$root_dir" ] && continue
+                root_dir="${root_dir/#\~/$HOME}"
+                [ -d "$root_dir/.git" ] && repo_candidates+=("$root_dir")
+                for sub_dir in "$root_dir"/*(/N); do
+                    [ -d "$sub_dir/.git" ] && repo_candidates+=("$sub_dir")
+                done
+            done < "$roots_file"
+        fi
+        if [ "${#repo_candidates[@]}" -eq 0 ]; then
+            local cur_top
+            cur_top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+            [ -n "$cur_top" ] && repo_candidates+=("$cur_top")
+        fi
+        if [ "${#repo_candidates[@]}" -eq 0 ]; then
+            printf "✖ optify-issues: no local git repositories found in %s.\n" "$roots_file" >&2
+            return 1
+        fi
+
+        local target_repo
+        target_repo="$(printf '%s\n' "${repo_candidates[@]}" | awk '!seen[$0]++' | fzf --height 40% --reverse --prompt="repo> ")" || return 0
+        [ -z "$target_repo" ] && return 0
+
+        local branch_name="feat/${num}-"
+        if [ -n "${ZSH_VERSION:-}" ] && [ -t 0 ]; then
+            vared -p "Branch: " branch_name || return 0
+        else
+            printf "Branch [%s]: " "$branch_name"
+            IFS= read -r branch_name || return 0
+        fi
+        branch_name="${branch_name#"${branch_name%%[![:space:]]*}"}"
+        branch_name="${branch_name%"${branch_name##*[![:space:]]}"}"
+        branch_name="${branch_name%-}"
+        [ -z "$branch_name" ] && branch_name="feat/${num}"
+
+        cd "$target_repo" || return 1
+        git checkout -b "$branch_name" || return 1
+
+        local overview="## Issue"
+        [ -n "$issue_title" ] && overview="${overview}"$'\n'"[${issue_title}](${issue_url})"
+        [ -n "$issue_body" ] && overview="${overview}"$'\n\n'"${issue_body}"
+        workset new --url "$issue_url" --overview "$overview"
         return $?
     fi
 

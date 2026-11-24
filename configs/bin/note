@@ -18,6 +18,7 @@ from _rig_common import (  # noqa: E402
     ctext,
     git_root,
     normalize_legacy_flags,
+    open_external_url,
     resolve_rig_root,
     resolve_workspace_vault,
 )
@@ -132,10 +133,9 @@ def open_note_target(path: Path, vault: Path, *, use_obsidian: bool) -> int:
     if use_obsidian:
         rel = path.relative_to(vault).with_suffix("").as_posix()
         uri = f"obsidian://open?vault={urllib.parse.quote(vault.name)}&file={urllib.parse.quote(rel)}"
-        opener = shutil.which("xdg-open") or shutil.which("wslview")
-        if not opener:
-            raise FileNotFoundError("Neither 'xdg-open' nor 'wslview' found for --obsidian.")
-        return subprocess.run([opener, uri]).returncode
+        if not open_external_url(uri, detach=False):
+            raise FileNotFoundError("No URI opener found ('xdg-open', 'wslview', or Windows interop) for --obsidian.")
+        return 0
 
     editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
     if editor:

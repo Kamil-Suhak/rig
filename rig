@@ -9,6 +9,7 @@ import json
 import os
 import pwd
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -299,8 +300,23 @@ class RigApp:
         if not ws_path.is_dir():
             self.new_workspace(ws_name)
         write_utf8_file(self.workspace_file, ws_name)
+        self.write_env_zsh(ws_name)
         badge("ACTIVE", "green", f"Active workspace set to: {ws_name}")
         return ws_name
+
+    def write_env_zsh(self, workspace: str) -> None:
+        """Pre-generate env.zsh so interactive Zsh starts without spawning Python."""
+        chain = self.get_workspace_chain(workspace)
+        env_path = self.local_paths["root"] / "env.zsh"
+        lines = [
+            "# Managed by rig. Regenerated on 'rig apply' and 'rig workspace use'.",
+            f"export RIG_STATE_HOME={shlex.quote(str(self.local_paths['root']))}",
+            f"export RIG_PROJECT_ROOTS={shlex.quote(str(self.local_paths['project_roots']))}",
+            f"export RIG_LOCAL_PROFILE={shlex.quote(str(self.local_paths['local_profile']))}",
+            f"export RIG_WORKSPACE={shlex.quote(workspace)}",
+            f"export RIG_WORKSPACE_CHAIN={shlex.quote(chr(10).join(chain))}",
+        ]
+        write_utf8_file(env_path, "\n".join(lines))
 
     def get_active_workspace(self, prompt_if_missing: bool = True) -> str:
         if self.workspace_file.is_file():
@@ -738,6 +754,14 @@ class RigApp:
                     applied += 1
 
         if not self.args.what_if:
+            self.write_env_zsh(workspace)
+            ws_bin = SCRIPT_DIR / "configs" / "bin" / "workset"
+            if ws_bin.is_file():
+                subprocess.run(
+                    [sys.executable, str(ws_bin), "--refresh-badge-cache"],
+                    check=False,
+                    capture_output=True,
+                )
             print(ctext(f"\nDone. Updated {applied} item(s).", "green"))
             if applied > 0:
                 prune_backups()
@@ -803,6 +827,22 @@ class RigApp:
                         subprocess.run(["git", "diff", "--no-index", "--color", tmp_path, str(lp)])
                     finally:
                         Path(tmp_path).unlink(missing_ok=True)
+
+        if self.should_process("skills"):
+            for link in self.get_desired_skill_links(workspace):
+                ds = get_link_status(link["source"], link["target"])
+                if ds != "Linked":
+                    diffs += 1
+                    print(ctext(f"\n--- AI Skill: {link['name']} ({ds}) ---", "magenta"))
+                    print(f"Expected link: {link['target']} -> {link['source']}")
+
+        if self.should_process("plugins"):
+            for link in self.get_desired_plugin_links():
+                ds = get_link_status(link["source"], link["target"])
+                if ds != "Linked":
+                    diffs += 1
+                    print(ctext(f"\n--- AI Plugin: {link['name']} ({ds}) ---", "magenta"))
+                    print(f"Expected link: {link['target']} -> {link['source']}")
 
         if self.should_process("dotfiles"):
             for link in self.get_desired_dotfile_links(workspace):
@@ -1336,6 +1376,31 @@ class RigApp:
         else:
             badge("WARN", "yellow", f"chsh failed; run 'chsh -s {zsh_bin}' manually.")
 
+    def _build_pty_ring(self) -> None:
+        crate_dir = SCRIPT_DIR / "tools" / "pty-ring"
+        target_bin = self.home_dir / ".local" / "bin" / "pty-ring"
+        if not (crate_dir / "Cargo.toml").is_file():
+            return
+        if target_bin.is_file() and not self.args.force:
+            badge("OK", "green", f"pty-ring is already installed at {target_bin}.")
+            return
+        cargo = shutil.which("cargo")
+        if not cargo:
+            badge("SKIP", "darkgray", "cargo not found on PATH; skipping pty-ring build.")
+            return
+        if self.args.what_if:
+            badge("WHAT-IF", "cyan", f"Would build {crate_dir} and install to {target_bin}")
+            return
+        badge("BUILD", "cyan", "Building pty-ring release binary...")
+        res = subprocess.run([cargo, "build", "--release"], cwd=str(crate_dir), check=False)
+        built = crate_dir / "target" / "release" / "pty-ring"
+        if res.returncode == 0 and built.is_file():
+            target_bin.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["install", "-m", "755", str(built), str(target_bin)], check=True)
+            badge("APPLIED", "green", f"Installed pty-ring -> {target_bin}")
+        else:
+            badge("WARN", "yellow", "pty-ring build failed; Ghostty will fall back to plain zsh.")
+
     def cmd_setup(self) -> int:
         mode = self.resolve_app_mode()
         print(ctext(f"\n=== Rig Machine Setup (mode={mode}) ===", "cyan"))
@@ -1347,6 +1412,7 @@ class RigApp:
         self._configure_git_identity()
         self._configure_project_roots()
         self._configure_default_shell()
+        self._build_pty_ring()
         print(ctext("\nMachine setup complete!\n", "green"))
         return 0
 

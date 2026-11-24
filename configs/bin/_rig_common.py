@@ -199,6 +199,51 @@ def write_clipboard(text: str) -> bool:
     return False
 
 
+def open_external_url(
+    url: str,
+    *,
+    prefer_browsers: tuple[str, ...] = (),
+    detach: bool = False,
+) -> bool:
+    """Open an HTTP(S) or custom URI using desktop openers or WSL2 Windows interop."""
+    candidates: list[list[str]] = []
+    for browser in prefer_browsers:
+        exe = shutil.which(browser)
+        if exe:
+            candidates.append([exe, url])
+    if shutil.which("xdg-open"):
+        candidates.append(["xdg-open", url])
+    if is_wsl():
+        if shutil.which("wslview"):
+            candidates.append(["wslview", url])
+        cmd_exe = shutil.which("cmd.exe") or (
+            "/mnt/c/Windows/System32/cmd.exe"
+            if Path("/mnt/c/Windows/System32/cmd.exe").is_file()
+            else None
+        )
+        if cmd_exe:
+            candidates.append([cmd_exe, "/c", "start", "", url])
+        ps = shutil.which("powershell.exe") or (
+            "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+            if Path("/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe").is_file()
+            else None
+        )
+        if ps:
+            escaped = url.replace("'", "''")
+            candidates.append([ps, "-NoProfile", "-Command", f"Start-Process '{escaped}'"])
+
+    for cmd in candidates:
+        try:
+            if detach:
+                subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                return True
+            if subprocess.run(cmd, check=False).returncode == 0:
+                return True
+        except OSError:
+            continue
+    return False
+
+
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 
 

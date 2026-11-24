@@ -25,36 +25,4 @@ md() {
     [ -n "$file" ] && mdcat "$file"
 }
 
-# @cmd: ask — Ask Gemini via isolated streamed agy session (--ctx, --high, --local, -r, --keep-history)
-ask() {
-    case "${1:-}" in
-        -h|--help|-Help)
-            cat <<'EOF'
-Usage: ask [--ctx [<sel>]] [--high] [--local] [-r|--reply] [-c|--continue] [--keep-history] <question>
-
-Query Antigravity CLI ('agy') in an isolated ask-home with streamed response.
-Accepts piped input (e.g. 'out | ask "why did this fail?"').
-Options:
-  --ctx              Include terminal command/output slice (default @1; pass 2, @2, or 3..2 before question)
-  --high             Use high-reasoning model (gemini-4-hydrogen-high)
-  --local            Run in current working directory (picks up repo-local GEMINI.md/AGENTS.md)
-  -r, --reply        Send a follow-up prompt to the most recent ask conversation (inherits its cwd)
-  -c, --continue     Open interactive agy TUI on the most recent ask conversation (inherits its cwd)
-  --keep-history     Save conversation in main ~/.gemini/antigravity-cli instead of ask-home
-  -h, --help         Show this help
-EOF
-            return 0
-            ;;
-    esac
-
-    local last_cmd=""
-    if command -v _rig_last_history_command >/dev/null 2>&1; then
-        last_cmd="$(_rig_last_history_command)"
-    fi
-
-    if [ -n "$last_cmd" ]; then
-        "${RIG_PYTHON:-python3}" "$RIG_ROOT/configs/bin/ask-helper" run --engine agy --fallback-command "$last_cmd" "$@"
-    else
-        "${RIG_PYTHON:-python3}" "$RIG_ROOT/configs/bin/ask-helper" run --engine agy "$@"
-    fi
-}
+export RIG_ASK_ENGINE="agy"

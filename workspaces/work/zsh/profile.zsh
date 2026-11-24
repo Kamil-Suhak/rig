@@ -15,34 +15,7 @@ if [ "${RIG_WSL_GIT_INTEROP:-0}" = "1" ] && command -v git.exe >/dev/null 2>&1; 
     }
 fi
 
-# @cmd: ask — Ask company-approved GitHub Copilot CLI (--ctx, piped stdin)
-ask() {
-    case "${1:-}" in
-        -h|--help|-Help)
-            cat <<'EOF'
-Usage: ask [--ctx [<sel>]] <question>
-
-Query GitHub Copilot CLI ('copilot -p') with streamed output and optional terminal context.
-Accepts piped input (e.g. 'out | ask "explain this error"').
-Options:
-  --ctx         Include terminal command/output slice (default ~1; pass 2, ~2, or ~3..2 before question)
-  -h, --help    Show this help
-EOF
-            return 0
-            ;;
-    esac
-
-    local last_cmd=""
-    if command -v _rig_last_history_command >/dev/null 2>&1; then
-        last_cmd="$(_rig_last_history_command)"
-    fi
-
-    if [ -n "$last_cmd" ]; then
-        "${RIG_PYTHON:-python3}" "$RIG_ROOT/configs/bin/ask-helper" run --engine copilot --fallback-command "$last_cmd" "$@"
-    else
-        "${RIG_PYTHON:-python3}" "$RIG_ROOT/configs/bin/ask-helper" run --engine copilot "$@"
-    fi
-}
+export RIG_ASK_ENGINE="copilot"
 
 # @cmd: azwho — Show active Azure CLI subscription, tenant, and signed-in user
 azwho() {

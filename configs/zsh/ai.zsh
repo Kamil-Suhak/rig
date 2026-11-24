@@ -37,6 +37,41 @@ EOF
     "${RIG_PYTHON:-python3}" "$RIG_ROOT/configs/bin/ask-helper" out "$@"
 }
 
+# @cmd: ask — Ask AI CLI (agy or copilot via RIG_ASK_ENGINE) in isolated ask-home (--ctx, --high, --local, -r, -c)
+ask() {
+    case "${1:-}" in
+        -h|--help|-Help)
+            cat <<EOF
+Usage: ask [--ctx [<sel>]] [--high] [--local] [-r|--reply] [-c|--continue] [--keep-history] <question>
+
+Query the active AI CLI (${RIG_ASK_ENGINE:-agy}) in an isolated ask-home with streamed response.
+Accepts piped input (e.g. 'out | ask "why did this fail?"').
+Options:
+  --ctx              Include terminal command/output slice (default @1; pass 2, @2, or 3..2 before question)
+  --high             Use high-reasoning model (agy only)
+  --local            Run in current working directory and inject active workset context
+  -r, --reply        Send a follow-up prompt to the most recent ask conversation (inherits its cwd)
+  -c, --continue     Open interactive session on the most recent ask conversation (inherits its cwd)
+  --keep-history     Save conversation in main CLI state instead of ask-home (agy only)
+  -h, --help         Show this help
+EOF
+            return 0
+            ;;
+    esac
+
+    local engine="${RIG_ASK_ENGINE:-agy}"
+    local last_cmd=""
+    if command -v _rig_last_history_command >/dev/null 2>&1; then
+        last_cmd="$(_rig_last_history_command)"
+    fi
+
+    if [ -n "$last_cmd" ]; then
+        "${RIG_PYTHON:-python3}" "$RIG_ROOT/configs/bin/ask-helper" run --engine "$engine" --fallback-command "$last_cmd" "$@"
+    else
+        "${RIG_PYTHON:-python3}" "$RIG_ROOT/configs/bin/ask-helper" run --engine "$engine" "$@"
+    fi
+}
+
 # @cmd: rerun — Re-run recent shell commands selected by N, @N, or A..B (-y to skip confirmation)
 rerun() {
     if [ "${__RIG_IN_RERUN:-0}" = "1" ]; then
@@ -176,18 +211,18 @@ PY
         esac
     fi
 
-    __RIG_IN_RERUN=1
+    export __RIG_IN_RERUN=1
     local rc=0
     for line in "${cmds[@]}"; do
         eval "$line"
         rc=$?
         if [ "$rc" -ne 0 ]; then
             printf '✖ Command exited with code %s: %s\n' "$rc" "$line" >&2
-            __RIG_IN_RERUN=0
+            export __RIG_IN_RERUN=0
             return "$rc"
         fi
     done
-    __RIG_IN_RERUN=0
+    export __RIG_IN_RERUN=0
     return 0
 }
 

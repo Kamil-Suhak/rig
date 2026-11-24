@@ -36,12 +36,25 @@ _rig_find_python() {
 }
 
 export RIG_PYTHON
-RIG_PYTHON="$(_rig_find_python || printf 'python3')"
+if [ -n "${RIG_PYTHON:-}" ] && command -v "$RIG_PYTHON" >/dev/null 2>&1; then
+    :
+elif command -v python3 >/dev/null 2>&1; then
+    RIG_PYTHON="python3"
+else
+    RIG_PYTHON="$(_rig_find_python || printf 'python3')"
+fi
 
-# Resolve machine-local XDG state paths (respecting env overrides for sandbox/tests)
-_rig_state_json="$("$RIG_PYTHON" "$RIG_ROOT/scripts/local_state.py" --checkout "$RIG_ROOT" --migrate --json 2>/dev/null || true)"
-if [ -n "$_rig_state_json" ]; then
-    eval "$("$RIG_PYTHON" - "$_rig_state_json" <<'PY'
+_rig_default_state_home="${RIG_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}/rig}"
+_rig_env_cache="$_rig_default_state_home/env.zsh"
+
+# Zero-fork fast path when env.zsh was pre-generated and no test/env overrides are active
+if [ -f "$_rig_env_cache" ] && [ -z "${RIG_WORKSPACE:-}" ] && [ -z "${RIG_PROJECT_ROOTS:-}" ] && [ -z "${RIG_STATE_HOME:-}" ]; then
+    . "$_rig_env_cache"
+else
+    # Resolve machine-local XDG state paths (respecting env overrides for sandbox/tests)
+    _rig_state_json="$("$RIG_PYTHON" "$RIG_ROOT/scripts/local_state.py" --checkout "$RIG_ROOT" --migrate --json 2>/dev/null || true)"
+    if [ -n "$_rig_state_json" ]; then
+        eval "$("$RIG_PYTHON" - "$_rig_state_json" <<'PY'
 import json
 import os
 import shlex
@@ -66,8 +79,10 @@ print(f"export RIG_LOCAL_PROFILE={shlex.quote(local_prof)}")
 print(f"export RIG_WORKSPACE={shlex.quote(ws)}")
 PY
 )"
+    fi
+    unset _rig_state_json
 fi
-unset _rig_state_json
+unset _rig_default_state_home _rig_env_cache
 
 export RIG_STATE_HOME="${RIG_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}/rig}"
 export RIG_PROJECT_ROOTS="${RIG_PROJECT_ROOTS:-$RIG_STATE_HOME/project-roots}"
@@ -88,7 +103,8 @@ _rig_prepend_path "$HOME/.local/bin"
 _rig_prepend_path "$RIG_ROOT"
 _rig_prepend_path "$RIG_ROOT/configs/bin"
 
-RIG_WORKSPACE_CHAIN="$("$RIG_PYTHON" - "$RIG_ROOT" "$RIG_WORKSPACE" <<'PY' 2>/dev/null || printf '%s\n' "$RIG_WORKSPACE"
+if [ -z "${RIG_WORKSPACE_CHAIN:-}" ]; then
+    RIG_WORKSPACE_CHAIN="$("$RIG_PYTHON" - "$RIG_ROOT" "$RIG_WORKSPACE" <<'PY' 2>/dev/null || printf '%s\n' "$RIG_WORKSPACE"
 import sys
 from pathlib import Path
 
@@ -99,6 +115,7 @@ for ws in resolve_workspace_chain(sys.argv[1], sys.argv[2]):
     print(ws)
 PY
 )"
+fi
 
 while IFS= read -r _rig_ws; do
     [ -n "$_rig_ws" ] && _rig_prepend_path "$RIG_ROOT/workspaces/$_rig_ws/bin"
@@ -255,64 +272,6 @@ try() {
     "${RIG_PYTHON:-python3}" "$RIG_ROOT/configs/bin/try" "$@"
 }
 
-# @cmd: update — Update system and AUR packages via yay (or pacman)
-update() {
-    if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-        printf 'Usage: update [yay/pacman args...]\n\nRun full system update via yay -Syu (or sudo pacman -Syu).\n'
-        return 0
-    fi
-    if command -v yay >/dev/null 2>&1; then
-        yay -Syu "$@"
-    else
-        sudo pacman -Syu "$@"
-    fi
-}
-
-# @cmd: install — Install packages via yay (or pacman)
-install() {
-    if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] || [ "$#" -eq 0 ]; then
-        printf 'Usage: install <pkg...>\n\nInstall packages via yay -S --needed (or sudo pacman -S --needed).\n'
-        [ "$#" -eq 0 ] && return 1 || return 0
-    fi
-    if command -v yay >/dev/null 2>&1; then
-        yay -S --needed "$@"
-    else
-        sudo pacman -S --needed "$@"
-    fi
-}
-
-# @cmd: remove — Remove packages and unused dependencies via yay (or pacman)
-remove() {
-    if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ] || [ "$#" -eq 0 ]; then
-        printf 'Usage: remove <pkg...>\n\nRemove packages and unused dependencies via yay -Rns (or sudo pacman -Rns).\n'
-        [ "$#" -eq 0 ] && return 1 || return 0
-    fi
-    if command -v yay >/dev/null 2>&1; then
-        yay -Rns "$@"
-    else
-        sudo pacman -Rns "$@"
-    fi
-}
-
-# @cmd: clean — Remove orphaned packages and prune package cache via yay/pacman
-clean() {
-    if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
-        printf 'Usage: clean\n\nRemove orphaned packages and clean package cache via yay (or pacman).\n'
-        return 0
-    fi
-    if command -v yay >/dev/null 2>&1; then
-        yay -Yc
-        yay -Sc
-    else
-        local orphans
-        orphans="$(pacman -Qdtq 2>/dev/null || true)"
-        if [ -n "$orphans" ]; then
-            sudo pacman -Rns ${=orphans}
-        fi
-        sudo pacman -Sc
-    fi
-}
-
 # --- Prompt Context Variables & Interactive Zsh Configuration ---
 
 _rig_update_prompt_vars() {
@@ -323,8 +282,25 @@ _rig_update_prompt_vars() {
         local branch
         branch="$(git symbolic-ref --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || true)"
         export cb="$branch"
-        if command -v workset >/dev/null 2>&1 && [ -n "$branch" ]; then
-            export cw="$(command workset --prompt-badge --root "$top" --branch "$branch" 2>/dev/null || true)"
+        if [ -n "$branch" ]; then
+            local badge_cache="${RIG_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}/rig}/workset-badges.tsv"
+            if [ ! -f "$badge_cache" ] && command -v workset >/dev/null 2>&1; then
+                command workset --refresh-badge-cache >/dev/null 2>&1 || true
+            fi
+            local found_badge="" w_root w_branch w_badge
+            if [ -f "$badge_cache" ]; then
+                while IFS=$'\t' read -r w_root w_branch w_badge; do
+                    if [ "$w_root" = "$top" ] && [ "$w_branch" = "$branch" ]; then
+                        found_badge="$w_badge"
+                        break
+                    fi
+                done < "$badge_cache"
+            fi
+            if [ -n "$found_badge" ]; then
+                export cw="$found_badge"
+            else
+                unset cw 2>/dev/null || true
+            fi
         else
             unset cw 2>/dev/null || true
         fi
@@ -336,6 +312,15 @@ _rig_update_prompt_vars() {
 if [ -n "${ZSH_VERSION:-}" ]; then
     # Only configure interactive Zsh plugins/prompt when running interactively
     if [[ -o interactive ]]; then
+        if [ -z "${PTY_RING_SOCK:-}" ] && [ -z "${RIG_NO_PTY_RING_EXEC:-}" ] && \
+           { [ -n "${WSL_DISTRO_NAME:-}" ] || [ -n "${WSL_INTEROP:-}" ]; } && \
+           [ -x "$HOME/.local/bin/pty-ring" ]; then
+            if [[ -o login ]]; then
+                exec "$HOME/.local/bin/pty-ring" /usr/bin/zsh -l
+            else
+                exec "$HOME/.local/bin/pty-ring" /usr/bin/zsh
+            fi
+        fi
         HIST_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/zsh"
         CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/zsh"
         mkdir -p "$HIST_DIR" "$CACHE_DIR"

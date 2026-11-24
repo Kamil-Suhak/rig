@@ -41,16 +41,7 @@ enum Phase {
     Output,
 }
 
-#[derive(Clone)]
-struct RawEntry {
-    command: String,
-    exit_code: Option<i32>,
-    output_bytes: Vec<u8>,
-    cols: u16,
-    rows: u16,
-}
-
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct RenderedEntry {
     command: String,
     exit_code: Option<i32>,
@@ -65,7 +56,7 @@ struct RingState {
     output_bytes: Vec<u8>,
     cols: u16,
     rows: u16,
-    entries: VecDeque<RawEntry>,
+    entries: VecDeque<RenderedEntry>,
 }
 
 impl RingState {
@@ -102,14 +93,7 @@ impl RingState {
     }
 
     fn rendered(&self) -> Vec<RenderedEntry> {
-        self.entries
-            .iter()
-            .map(|e| RenderedEntry {
-                command: e.command.clone(),
-                exit_code: e.exit_code,
-                output: render_vt_lines(&e.output_bytes, e.rows, e.cols),
-            })
-            .collect()
+        self.entries.iter().cloned().collect()
     }
 }
 
@@ -174,15 +158,15 @@ impl Perform for RingState {
                         });
                     let is_out_cmd = cmd.split_whitespace().next() == Some("out");
                     if !is_out_cmd && (!cmd.is_empty() || !self.output_bytes.is_empty()) {
+                        let rendered_out = render_vt_lines(&self.output_bytes, self.rows, self.cols);
+                        self.output_bytes.clear();
                         if self.entries.len() >= MAX_ENTRIES {
                             self.entries.pop_front();
                         }
-                        self.entries.push_back(RawEntry {
+                        self.entries.push_back(RenderedEntry {
                             command: cmd,
                             exit_code,
-                            output_bytes: std::mem::take(&mut self.output_bytes),
-                            cols: self.cols,
-                            rows: self.rows,
+                            output: rendered_out,
                         });
                     } else {
                         self.output_bytes.clear();
@@ -211,11 +195,12 @@ fn decode_hex(bytes: &[u8]) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-fn render_vt_lines(raw: &[u8], rows: u16, cols: u16) -> Vec<String> {
+fn render_vt_lines(raw: &[u8], _rows: u16, cols: u16) -> Vec<String> {
     if raw.is_empty() {
         return Vec::new();
     }
-    let mut parser = vt100::Parser::new(rows.max(24), cols.max(120), 10_000);
+    // Use a tall virtual viewport so long stack traces / build logs aren't truncated by terminal height
+    let mut parser = vt100::Parser::new(2000, cols.max(120), 0);
     parser.process(raw);
     let screen = parser.screen();
     let contents = screen.contents();
@@ -329,8 +314,6 @@ fn main() {
     let pty = openpty(Some(&ws), None).expect("openpty failed");
     let sock_path = make_socket_path();
     let state = Arc::new(Mutex::new(RingState::new(ws.ws_col, ws.ws_row)));
-    let _sock_guard = SocketGuard(sock_path.clone());
-    let _ = spawn_socket_server(&sock_path, Arc::clone(&state));
 
     match unsafe { fork() }.expect("fork failed") {
         ForkResult::Child => {
@@ -355,6 +338,8 @@ fn main() {
         }
         ForkResult::Parent { child } => {
             drop(pty.slave);
+            let _sock_guard = SocketGuard(sock_path.clone());
+            let _ = spawn_socket_server(&sock_path, Arc::clone(&state));
 
             let _termios_guard = orig_termios.map(|orig| {
                 let mut raw = orig.clone();

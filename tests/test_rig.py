@@ -227,9 +227,9 @@ class TestRigCli(unittest.TestCase):
         sandbox_repo.mkdir()
         shutil.copy2(REPO_ROOT / "rig", sandbox_repo / "rig")
         shutil.copy2(REPO_ROOT / "rig.config.json", sandbox_repo / "rig.config.json")
-        shutil.copytree(REPO_ROOT / "scripts", sandbox_repo / "scripts")
-        shutil.copytree(REPO_ROOT / "configs", sandbox_repo / "configs")
-        shutil.copytree(REPO_ROOT / "workspaces", sandbox_repo / "workspaces")
+        shutil.copytree(REPO_ROOT / "scripts", sandbox_repo / "scripts", symlinks=True)
+        shutil.copytree(REPO_ROOT / "configs", sandbox_repo / "configs", symlinks=True)
+        shutil.copytree(REPO_ROOT / "workspaces", sandbox_repo / "workspaces", symlinks=True)
         return sandbox_repo
 
     def test_workspace_inheritance_rbc_extends_work(self) -> None:
@@ -580,12 +580,13 @@ class TestClipboardJwtAndDecide(unittest.TestCase):
                 if fname != "fresh.zip":
                     os.utime(p, (old_ts, old_ts))
 
-            dry = run_cli(BIN_DIR / "triage-files", ["--dir", str(tdir), "--dry-run"], env={"GEMINI_API_KEY": ""})
+            triage_bin = REPO_ROOT / "workspaces" / "personal" / "bin" / "triage-files"
+            dry = run_cli(triage_bin, ["--dir", str(tdir), "--dry-run"], env={"GEMINI_API_KEY": ""})
             self.assertEqual(dry.returncode, 0, dry.stderr)
             self.assertIn("[DRY-RUN] archive.zip -> archives/archive.zip", dry.stdout)
             self.assertTrue((tdir / "archive.zip").is_file())
 
-            real = run_cli(BIN_DIR / "triage-files", ["--dir", str(tdir)], env={"GEMINI_API_KEY": ""})
+            real = run_cli(triage_bin, ["--dir", str(tdir)], env={"GEMINI_API_KEY": ""})
             self.assertEqual(real.returncode, 0, real.stderr)
             self.assertTrue((tdir / "archives" / "archive.zip").is_file())
             self.assertTrue((tdir / "installers" / "app.AppImage").is_file())
@@ -628,11 +629,13 @@ class TestClipboardJwtAndDecide(unittest.TestCase):
             self.assertTrue((ask_home / ".gemini" / "GEMINI.md").is_symlink())
             self.assertFalse((ask_home / ".gemini" / "skills").exists())
 
-            # 3. -r from anywhere inherits proj_dir and passes --conversation conv-123
+            # 3. -r from anywhere inherits proj_dir, passes --conversation conv-123, omits --model, and prints tooltip
             r_res = run_cli(BIN_DIR / "ask-helper", ["run", "--engine", "agy", "-r", "follow up"], env=env, cwd=tpath)
             self.assertEqual(r_res.returncode, 0, r_res.stderr)
             self.assertIn(f"cwd={proj_dir}", r_res.stdout)
             self.assertIn("'--conversation', 'conv-123'", r_res.stdout)
+            self.assertNotIn("'--model'", r_res.stdout)
+            self.assertIn("Follow-up: ask -r", r_res.stderr)
 
             # 4. -c --local errors before reaching agent; -c launches interactive agy in proj_dir
             r_cerr = run_cli(BIN_DIR / "ask-helper", ["run", "--engine", "agy", "-c", "--local"], env=env, cwd=tpath)
@@ -946,6 +949,86 @@ class TestWorkset(unittest.TestCase):
             self.assertTrue(r_note.is_file())
             self.assertIn("Parent: [[DodgeOptifyRequirements]]", r_note.read_text(encoding="utf-8"))
 
+    def test_workset_dirty_sync_ask_local_and_badge_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tpath = Path(tmp)
+            ws_root = tpath / "worksets-store"
+            state_home = tpath / "state"
+            ask_home = tpath / "ask-home"
+            fake_bin = tpath / "fake-bin"
+            fake_bin.mkdir()
+
+            repo = tpath / "demo-repo"
+            init_git_repo(repo, "feat/demo-1")
+            f1 = repo / "alpha.py"
+            f2 = repo / "beta.py"
+            f1.write_text("print('a')\n", encoding="utf-8")
+            f2.write_text("print('b')\n", encoding="utf-8")
+
+            env = {
+                "RIG_WORKSETS_ROOT": str(ws_root),
+                "RIG_STATE_HOME": str(state_home),
+                "RIG_ASK_HOME": str(ask_home),
+            }
+
+            # Create empty workset and verify ask --local skips injecting empty template
+            self.assertEqual(run_cli(BIN_DIR / "workset", ["new"], cwd=repo, env=env).returncode, 0)
+
+            fake_agy = fake_bin / "fake-agy"
+            fake_agy.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, sys\n"
+                "prompt = sys.argv[sys.argv.index('-p') + 1]\n"
+                "print(json.dumps({'event': 'result', 'result': {'conversation_id': 'ws-conv-1', 'status': 'SUCCESS', 'response': prompt}}))\n",
+                encoding="utf-8",
+            )
+            fake_agy.chmod(0o755)
+
+            r_empty = run_cli(
+                BIN_DIR / "ask-helper",
+                ["run", "--engine", "agy", "--local", "--executable", str(fake_agy), "explain"],
+                cwd=repo,
+                env=env,
+            )
+            self.assertEqual(r_empty.returncode, 0, r_empty.stderr)
+            self.assertNotIn("[Workset Context:", r_empty.stdout)
+            self.assertNotIn("Loaded workset:", r_empty.stderr)
+
+            # workset add --dirty appends f1 & f2 and deduplicates relative vs absolute
+            r_dirty = run_cli(BIN_DIR / "workset", ["add", "--dirty"], cwd=repo, env=env)
+            self.assertEqual(r_dirty.returncode, 0, r_dirty.stderr)
+            r_dup = run_cli(BIN_DIR / "workset", ["add", str(f1.resolve())], cwd=repo, env=env)
+            self.assertEqual(r_dup.returncode, 0, r_dup.stderr)
+            note_txt = (ws_root / "active" / "feat-demo-1.md").read_text(encoding="utf-8")
+            self.assertEqual(note_txt.count("demo-repo/alpha.py"), 1)
+            self.assertIn("demo-repo/beta.py", note_txt)
+
+            # Badge cache updated automatically
+            cache_txt = (state_home / "workset-badges.tsv").read_text(encoding="utf-8")
+            self.assertIn(f"{repo.resolve()}\tfeat/demo-1\t✦2", cache_txt)
+
+            # Now ask --local loads non-empty workset and prints explicit status
+            r_loaded = run_cli(
+                BIN_DIR / "ask-helper",
+                ["run", "--engine", "agy", "--local", "--executable", str(fake_agy), "explain"],
+                cwd=repo,
+                env=env,
+            )
+            self.assertEqual(r_loaded.returncode, 0, r_loaded.stderr)
+            self.assertIn("Loaded workset: feat-demo-1", r_loaded.stderr)
+            self.assertIn("[Workset Context: feat-demo-1]", r_loaded.stdout)
+            self.assertIn("demo-repo/alpha.py", r_loaded.stdout)
+
+            # Commit f1 and delete f2, then workset sync replaces list with only dirty/unpushed files
+            subprocess.run(["git", "-C", str(repo), "add", "alpha.py"], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(repo), "commit", "-m", "feat: commit alpha"], check=True, capture_output=True)
+            f2.unlink()
+            r_sync = run_cli(BIN_DIR / "workset", ["sync"], cwd=repo, env=env)
+            self.assertEqual(r_sync.returncode, 0, r_sync.stderr)
+            synced_txt = (ws_root / "active" / "feat-demo-1.md").read_text(encoding="utf-8")
+            self.assertNotIn("demo-repo/alpha.py", synced_txt)
+            self.assertNotIn("demo-repo/beta.py", synced_txt)
+
     def test_clipboard_shared_transforms(self) -> None:
         common = load_extensionless_module("rig_common_mod", BIN_DIR / "_rig_common.py")
         raw = "  \033[36mhello\033[0m\nworld  \n"
@@ -1068,7 +1151,7 @@ class TestZshFunctionsViaBash(unittest.TestCase):
             script1 = "\n".join(
                 [
                     "set -e",
-                    "for fn in gdiff b nb lg wip unwip stashes groot mkcd p open out rerun which venv ask update install remove clean try; do",
+                    "for fn in gdiff b nb lg wip unwip stashes groot mkcd p open out rerun which venv ask try; do",
                     '  "$fn" -h >/dev/null',
                     "done",
                     "which profile -h",

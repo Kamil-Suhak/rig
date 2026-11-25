@@ -702,7 +702,7 @@
         { "name": "hypr", "repoSubpath": "hypr", "localTarget": "~/.config/hypr" },
         { "name": "waybar", "repoSubpath": "waybar", "localTarget": "~/.config/waybar" },
         { "name": "rofi", "repoSubpath": "rofi", "localTarget": "~/.config/rofi" },
-        { "name": "rofi", "repoSubpath": "rofi", "localTarget": "~/.config/rofi" },
+        { "name": "brave-flags", "repoSubpath": "brave-flags.conf", "localTarget": "~/.config/brave-flags.conf" },
         { "name": "mako", "repoSubpath": "mako", "localTarget": "~/.config/mako" },
         { "name": "mdcat", "repoSubpath": "mdcat", "localTarget": "~/.config/mdcat" },
         { "name": "micro", "repoSubpath": "micro", "localTarget": "~/.config/micro" },

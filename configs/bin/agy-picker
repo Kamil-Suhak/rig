@@ -6,12 +6,31 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
 import sys
 import urllib.parse
 from pathlib import Path
+
+
+_MENTION_TAG_RE = re.compile(r"@\[[^\]]+\]")
+_CONV_MENTION_RE = re.compile(r'@\[conversation:"([^"]+)"\]')
+
+
+def _format_label(title: str | None, preview: str | None, cid: str) -> str:
+    raw_title = _MENTION_TAG_RE.sub("", (title or "")).strip()
+    if raw_title:
+        return " ".join(raw_title.split())[:72]
+    first_line = ((preview or "").strip().splitlines() or [""])[0]
+    cleaned_preview = _MENTION_TAG_RE.sub("", first_line).strip()
+    if cleaned_preview:
+        return " ".join(cleaned_preview.split())[:72]
+    m = _CONV_MENTION_RE.search(first_line)
+    if m and m.group(1).strip():
+        return " ".join(m.group(1).split())[:72]
+    return cid[:8]
 
 
 def _parse_workspace_dir(raw_uris: str, fallback: Path) -> Path:
@@ -56,8 +75,7 @@ def load_conversations(cli_dir: Path, *, limit: int = 50) -> list[dict[str, str]
         for cid, title, preview, raw_uris, mtime in cur.fetchall():
             if not (cli_dir / "conversations" / f"{cid}.db").is_file():
                 continue
-            label = (title or "").strip() or (preview or "").strip().splitlines()[0] if (title or "").strip() or (preview or "").strip() else cid[:8]
-            label = " ".join(label.split())[:72]
+            label = _format_label(title, preview, str(cid))
             cwd = _parse_workspace_dir(str(raw_uris), home)
             ws_name = "~" if cwd == home else cwd.name
             short_date = str(mtime)[:16].replace("T", " ")
@@ -93,17 +111,18 @@ def main(argv: list[str] | None = None) -> int:
         empty_msg = "No Antigravity CLI conversations found."
 
     items = load_conversations(cli_dir, limit=args.limit)
-    if not items:
-        if shutil.which("notify-send"):
-            subprocess.run(["notify-send", "agy-picker", empty_msg], check=False)
-        else:
-            print(empty_msg, file=sys.stderr)
-        return 1
-
     if args.list:
+        if not items:
+            print(empty_msg, file=sys.stderr)
+            return 1
         for item in items:
             print(f"{item['id']}\t{item['cwd']}\t{item['display']}")
         return 0
+
+    menu_items = [
+        {"id": "__new__", "cwd": str(Path.home()), "display": "[NEW] Start new session"},
+        *items,
+    ]
 
     toggle_script = Path.home() / ".config" / "hypr" / "scripts" / "rofi-toggle.sh"
     rofi = str(toggle_script) if toggle_script.is_file() else shutil.which("rofi")
@@ -111,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         print("✖ agy-picker: 'rofi' not found in PATH.", file=sys.stderr)
         return 1
 
-    menu_input = "\n".join(item["display"] for item in items)
+    menu_input = "\n".join(item["display"] for item in menu_items)
     res = subprocess.run(
         [rofi, "-dmenu", "-format", "i", "-i", "-p", prompt_label, "-theme-str", "window { width: 820px; }"],
         input=menu_input,
@@ -124,14 +143,19 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         idx = int(res.stdout.strip())
-        chosen = items[idx]
+        chosen = menu_items[idx]
     except (ValueError, IndexError):
         return 1
 
-    if args.ask:
-        cmd = ["ghostty", f"--working-directory={chosen['cwd']}", "-e", "env", f"HOME={ask_home}", "agy", "--conversation", chosen["id"]]
+    if chosen["id"] == "__new__":
+        agy_tail = ["agy"]
     else:
-        cmd = ["ghostty", f"--working-directory={chosen['cwd']}", "-e", "agy", "--conversation", chosen["id"]]
+        agy_tail = ["agy", "--conversation", chosen["id"]]
+
+    if args.ask:
+        cmd = ["ghostty", f"--working-directory={chosen['cwd']}", "-e", "env", f"HOME={ask_home}", *agy_tail]
+    else:
+        cmd = ["ghostty", f"--working-directory={chosen['cwd']}", "-e", *agy_tail]
     if args.dry_run:
         print(" ".join(cmd))
         return 0

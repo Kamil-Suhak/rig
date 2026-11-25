@@ -703,7 +703,7 @@ class TestClipboardJwtAndDecide(unittest.TestCase):
             con2.execute("DELETE FROM conversation_summaries")
             con2.execute(
                 "INSERT INTO conversation_summaries VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("cid-ask", "", "Quick ask question", 2, json.dumps([ws_dir.as_uri()]), "2026-11-22T00:15:00Z", ""),
+                ("cid-ask", "", '@[conversation:"Thesis"] Quick ask question', 2, json.dumps([ws_dir.as_uri()]), "2026-11-22T00:15:00Z", ""),
             )
             con2.commit()
             con2.close()
@@ -711,6 +711,22 @@ class TestClipboardJwtAndDecide(unittest.TestCase):
             self.assertEqual(res_ask.returncode, 0, res_ask.stderr)
             self.assertIn("cid-ask", res_ask.stdout)
             self.assertIn("Quick ask question", res_ask.stdout)
+            self.assertNotIn('@[conversation:"Thesis"]', res_ask.stdout)
+
+            # Verify [NEW] option is prepended at index 0 and launches fresh session
+            fake_home = tpath / "fake-home"
+            rofi_dir = fake_home / ".config" / "hypr" / "scripts"
+            rofi_dir.mkdir(parents=True)
+            fake_rofi = rofi_dir / "rofi-toggle.sh"
+            fake_rofi.write_text("#!/usr/bin/env sh\ncat >/dev/null\nprintf '0\\n'\n", encoding="utf-8")
+            fake_rofi.chmod(0o755)
+            res_new = run_cli(
+                BIN_DIR / "agy-picker",
+                ["--dry-run"],
+                env={"HOME": str(fake_home), "RIG_AGY_CLI_DIR": str(tpath)},
+            )
+            self.assertEqual(res_new.returncode, 0, res_new.stderr)
+            self.assertTrue(res_new.stdout.strip().endswith("-e agy"), res_new.stdout)
 
 
 class TestAskHelper(unittest.TestCase):

@@ -3,21 +3,25 @@
     "output": "eDP-1",
     "layer": "bottom",
     "position": "top",
-    "height": 30,
+    "height": 32,
     "margin-top": 6,
     "margin-left": 8,
     "margin-right": 8,
     "spacing": 6,
     "modules-left": ["hyprland/workspaces", "hyprland/window"],
     "modules-center": ["clock"],
-    "modules-right": ["pulseaudio", "bluetooth", "network", "custom/power-mode", "battery", "tray"],
+    "modules-right": ["bluetooth", "network", "pulseaudio", "custom/power-mode", "custom/sep", "battery", "tray"],
     "hyprland/window": {
       "format": "{title}",
       "max-length": 45,
       "separate-outputs": true
     },
+    "custom/sep": {
+      "format": "│",
+      "tooltip": false
+    },
     "custom/power-mode": {
-      "exec": "~/.config/hypr/scripts/power-mode.sh status",
+      "exec": "~/.config/hypr/scripts/power-mode.sh status-icon",
       "return-type": "json",
       "interval": 10,
       "signal": 8,
@@ -25,9 +29,11 @@
     },
     "bluetooth": {
       "format": "󰂯",
-      "format-connected": "󰂱 {device_alias}",
+      "format-connected": "󰂱",
       "format-off": "󰂲",
-      "tooltip-format": "{controller_alias}\t{status}",
+      "tooltip-format": "{controller_alias}\t{status}\n{num_connections} connected",
+      "tooltip-format-connected": "{controller_alias}\t{status}\n\n{device_enumerate}",
+      "tooltip-format-enumerate-connected": "{device_alias} ({device_battery_percentage}%)",
       "on-click": "~/.config/hypr/scripts/waybar-menu.sh bluetooth"
     },
     "hyprland/workspaces": {
@@ -36,27 +42,35 @@
       "sort-by-number": true
     },
     "clock": {
-      "format": "{:%a %d %b  %H:%M}",
-      "tooltip-format": "<tt>{calendar}</tt>"
+      "format": "󰥔  {:%a %d %b  %H:%M}",
+      "tooltip": false
     },
     "pulseaudio": {
-      "format": "󰕾 {volume}%",
-      "format-muted": "󰖁 muted",
-      "on-click": "pavucontrol",
+      "format": "{icon}",
+      "format-muted": "󰖁",
+      "format-icons": {
+        "default": ["󰕿", "󰖀", "󰕾"]
+      },
+      "tooltip-format": "{desc}\nVolume: {volume}%",
+      "on-click": "~/.config/hypr/scripts/waybar-menu.sh audio",
       "scroll-step": 5
     },
     "network": {
-      "format-wifi": "󰤨 {essid}",
-      "format-ethernet": "󰈀 {ifname}",
-      "format-disconnected": "󰤭 offline",
-      "tooltip-format": "{ipaddr}/{cidr} ({signalStrength}%)",
+      "format-wifi": "{icon}",
+      "format-ethernet": "󰈀",
+      "format-disconnected": "󰤭",
+      "format-icons": ["󰤯", "󰤟", "󰤢", "󰤥", "󰤨"],
+      "tooltip-format-wifi": "{essid} ({signalStrength}%)\n{ifname}: {ipaddr}/{cidr}\nGW: {gwaddr}",
+      "tooltip-format-ethernet": "Wired ({ifname})\n{ipaddr}/{cidr}\nGW: {gwaddr}",
+      "tooltip-format-disconnected": "Disconnected — click to manage networks",
       "on-click": "~/.config/hypr/scripts/waybar-menu.sh wifi"
     },
     "battery": {
       "states": { "warning": 25, "critical": 12 },
-      "format": "{icon} {capacity}%",
-      "format-charging": "󰂄 {capacity}%",
-      "format-icons": ["󰁺", "󰁼", "󰁾", "󰂀", "󰁹"]
+      "format": "{icon}",
+      "format-charging": "󰂄",
+      "format-icons": ["󰁺", "󰁼", "󰁾", "󰂀", "󰁹"],
+      "tooltip-format": "{capacity}% · {timeTo}"
     },
     "tray": { "icon-size": 15, "spacing": 8 }
   },
@@ -65,18 +79,22 @@
     "name": "external",
     "layer": "bottom",
     "position": "top",
-    "height": 34,
+    "height": 36,
     "margin-top": 6,
     "margin-left": 8,
     "margin-right": 8,
     "spacing": 6,
     "modules-left": ["hyprland/workspaces", "hyprland/window"],
     "modules-center": ["clock"],
-    "modules-right": ["pulseaudio", "bluetooth", "network", "custom/power-mode", "battery", "tray"],
+    "modules-right": ["bluetooth", "network", "pulseaudio", "custom/power-mode", "custom/sep", "battery", "tray"],
     "hyprland/window": {
       "format": "{title}",
       "max-length": 45,
       "separate-outputs": true
+    },
+    "custom/sep": {
+      "format": "│",
+      "tooltip": false
     },
     "custom/power-mode": {
       "exec": "~/.config/hypr/scripts/power-mode.sh status",
@@ -89,7 +107,9 @@
       "format": "󰂯",
       "format-connected": "󰂱 {device_alias}",
       "format-off": "󰂲",
-      "tooltip-format": "{controller_alias}\t{status}",
+      "tooltip-format": "{controller_alias}\t{status}\n{num_connections} connected",
+      "tooltip-format-connected": "{controller_alias}\t{status}\n\n{device_enumerate}",
+      "tooltip-format-enumerate-connected": "{device_alias} ({device_battery_percentage}%)",
       "on-click": "~/.config/hypr/scripts/waybar-menu.sh bluetooth"
     },
     "hyprland/workspaces": {
@@ -98,27 +118,35 @@
       "sort-by-number": true
     },
     "clock": {
-      "format": "{:%a %d %b  %H:%M}",
-      "tooltip-format": "<tt>{calendar}</tt>"
+      "format": "󰥔  {:%a %d %b  %H:%M}",
+      "tooltip": false
     },
     "pulseaudio": {
-      "format": "󰕾 {volume}%",
+      "format": "{icon} {volume}%",
       "format-muted": "󰖁 muted",
-      "on-click": "pavucontrol",
+      "format-icons": {
+        "default": ["󰕿", "󰖀", "󰕾"]
+      },
+      "tooltip-format": "{desc}\nVolume: {volume}%",
+      "on-click": "~/.config/hypr/scripts/waybar-menu.sh audio",
       "scroll-step": 5
     },
     "network": {
-      "format-wifi": "󰤨 {essid}",
+      "format-wifi": "{icon} {essid}",
       "format-ethernet": "󰈀 {ifname}",
-      "format-disconnected": "󰤭 offline",
-      "tooltip-format": "{ipaddr}/{cidr} ({signalStrength}%)",
+      "format-disconnected": "󰤭 Offline",
+      "format-icons": ["󰤯", "󰤟", "󰤢", "󰤥", "󰤨"],
+      "tooltip-format-wifi": "{essid} ({signalStrength}%)\n{ifname}: {ipaddr}/{cidr}\nGW: {gwaddr}",
+      "tooltip-format-ethernet": "Wired ({ifname})\n{ipaddr}/{cidr}\nGW: {gwaddr}",
+      "tooltip-format-disconnected": "Disconnected — click to manage networks",
       "on-click": "~/.config/hypr/scripts/waybar-menu.sh wifi"
     },
     "battery": {
       "states": { "warning": 25, "critical": 12 },
       "format": "{icon} {capacity}%",
       "format-charging": "󰂄 {capacity}%",
-      "format-icons": ["󰁺", "󰁼", "󰁾", "󰂀", "󰁹"]
+      "format-icons": ["󰁺", "󰁼", "󰁾", "󰂀", "󰁹"],
+      "tooltip-format": "{capacity}% · {timeTo}"
     },
     "tray": { "icon-size": 16, "spacing": 8 }
   }

@@ -81,6 +81,9 @@ def read_pty_ring_blocks() -> list[dict[str, object]]:
                 {
                     "command": cmd_str,
                     "exit_code": item.get("exit_code"),
+                    "cwd": item.get("cwd"),
+                    "started_at": item.get("started_at"),
+                    "duration_ms": item.get("duration_ms"),
                     "output": [str(line) for line in (item.get("output") or [])],
                 }
             )
@@ -159,8 +162,16 @@ def build_prompt_text(
                 for idx in indices:
                     b = blocks[idx]
                     ec = b.get("exit_code")
-                    ec_note = f" (exit {ec})" if isinstance(ec, int) and ec != 0 else ""
-                    ctx_lines.append(f"$ {b['command']}{ec_note}")
+                    meta_parts: list[str] = []
+                    if b.get("cwd"):
+                        meta_parts.append(str(b["cwd"]))
+                    if isinstance(ec, int) and ec != 0:
+                        meta_parts.append(f"exit {ec}")
+                    dur = b.get("duration_ms")
+                    if isinstance(dur, int) and dur >= 1000:
+                        meta_parts.append(f"{dur / 1000:.1f}s")
+                    meta_note = f" ({', '.join(meta_parts)})" if meta_parts else ""
+                    ctx_lines.append(f"$ {b['command']}{meta_note}")
                     out_lines: list[str] = b["output"]  # type: ignore[assignment]
                     if out_lines:
                         ctx_lines.extend(out_lines)
@@ -645,7 +656,22 @@ def _load_local_workset_context(cwd: str) -> tuple[str, str] | None:
     return name, "\n\n".join(parts)
 
 
+def _resolve_workspace_notes_dir(real_home: Path) -> Path:
+    """Resolve the Obsidian notes directory for the active rig workspace."""
+    override = os.environ.get("RIG_NOTES_DIR", "").strip()
+    if override:
+        return Path(override).expanduser()
+    ws = os.environ.get("RIG_WORKSPACE", "personal").strip().lower()
+    chain = [c.strip().lower() for c in os.environ.get("RIG_WORKSPACE_CHAIN", "").splitlines() if c.strip()]
+    if ws in ("rbc", "work") or "work" in chain or "rbc" in chain:
+        return real_home / "work-notes"
+    return real_home / "notes"
+
+
 def cmd_run(args: argparse.Namespace) -> int:
+    if args.vault_cleanup and (args.local or args.reply or args.continue_interactive or args.ctx):
+        print(_ce(sys.stderr, "✖ ask: cannot combine --vault-cleanup with --local, --ctx, -r/--reply, or -c/--continue.", "red"), file=sys.stderr)
+        return 2
     if args.reply and args.local:
         print(_ce(sys.stderr, "✖ ask: cannot combine -r/--reply with --local; -r inherits the conversation's original directory.", "red"), file=sys.stderr)
         return 2
@@ -662,6 +688,24 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not exe:
         print(_ce(sys.stderr, f"✖ ask: '{default_bin}' CLI not found in PATH.", "red"), file=sys.stderr)
         return 1
+
+    if args.vault_cleanup:
+        notes_dir = _resolve_workspace_notes_dir(real_home)
+        if not notes_dir.is_dir():
+            print(_ce(sys.stderr, f"✖ ask: notes directory not found: {notes_dir}", "red"), file=sys.stderr)
+            return 1
+        model = "gemini-4-hydrogen-high" if args.high else "gemini-4-hydrogen-low"
+        if args.engine == "copilot":
+            code, _ = stream_ask_process(exe, ["-s", "-p", "/vault-cleanup"], "copilot", stream_json=False, cwd=str(notes_dir))
+            return code
+        code, _ = stream_ask_process(
+            exe,
+            ["--model", model, "--output-format", "stream-json", "-p", "/vault-cleanup"],
+            f"{model} · vault-cleanup",
+            stream_json=True,
+            cwd=str(notes_dir),
+        )
+        return code
 
     def _isolated_env() -> dict[str, str]:
         env_map = dict(os.environ)
@@ -852,6 +896,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--ctx", action="store_true", help="Include recent terminal context")
     p_run.add_argument("--high", action="store_true", help="Use high-reasoning model (agy only)")
     p_run.add_argument("--local", action="store_true", help="Run in current working directory instead of global ask-home")
+    p_run.add_argument("--vault-cleanup", action="store_true", help="Run '/vault-cleanup' in the active workspace's Obsidian notes directory")
     p_run.add_argument("-r", "--reply", action="store_true", help="Reply to the most recent ask conversation in its original cwd")
     p_run.add_argument("-c", "--continue", dest="continue_interactive", action="store_true", help="Open interactive agy session on the most recent ask conversation")
     p_run.add_argument("--keep-history", action="store_true", help="Retain agy conversation in main ~/.gemini/antigravity-cli")

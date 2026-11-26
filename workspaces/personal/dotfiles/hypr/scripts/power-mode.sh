@@ -142,9 +142,10 @@ set_mode() {
 }
 
 cmd_status() {
+  local compact="${1:-0}"
   reconcile
   read_state
-  local ac_label profile text cls tooltip
+  local ac_label profile text icon cls tooltip
   if is_on_ac; then
     ac_label="AC"
   else
@@ -152,29 +153,77 @@ cmd_status() {
   fi
 
   if [[ "$MODE" == "auto" ]]; then
+    icon="󰑐"
+    text="󰑐 Auto"
     if is_on_ac; then
-      text="󰚥 Auto"
       cls="auto"
     else
-      text="󰌪 Auto"
       cls="low"
     fi
   elif [[ "$MODE" == "manual" && "$MANUAL_TARGET" == "high" ]]; then
+    icon="󰗑"
     text="󰗑 High"
     cls="high"
   elif [[ "$MODE" == "manual" ]]; then
+    icon="󰌪"
     text="󰌪 Low"
     cls="low"
   else
+    icon="󰒍"
     text="󰒍 Server"
     cls="server"
   fi
 
   profile="$(powerprofilesctl get 2>/dev/null || echo unknown)"
   if [[ "$MODE" == "server" ]]; then
-    tooltip="Mode: Server / AFK (${ac_label}) | Profile: ${profile} | Sleep & lid-suspend blocked | Peek re-blanks in 25s"
+    tooltip="Server · ${profile} (${ac_label}) · sleep blocked"
+  elif [[ "$MODE" == "auto" ]]; then
+    tooltip="Auto · ${profile} (${ac_label})"
+  elif [[ "$MANUAL_TARGET" == "high" ]]; then
+    tooltip="High · ${profile} (${ac_label})"
   else
-    tooltip="Mode: ${MODE}${MODE:+ (${MANUAL_TARGET})} (${ac_label}) | Profile: ${profile} | Click to switch"
+    tooltip="Low · ${profile} (${ac_label})"
+  fi
+
+  if [[ "$compact" == "1" ]]; then
+    local cap bat_status bat_icon bat_time bat_line
+    read -r cap bat_status < <(battery_info)
+    if [[ "$bat_status" == "Charging" ]]; then
+      bat_icon="󰂄"
+    elif (( cap <= 15 )); then
+      bat_icon="󰁺"
+    elif (( cap <= 35 )); then
+      bat_icon="󰁼"
+    elif (( cap <= 60 )); then
+      bat_icon="󰁾"
+    elif (( cap <= 85 )); then
+      bat_icon="󰂀"
+    else
+      bat_icon="󰁹"
+    fi
+
+    bat_time=""
+    if command -v upower >/dev/null 2>&1; then
+      local bat_dev
+      bat_dev="$(upower -e 2>/dev/null | grep -m1 BAT || true)"
+      if [[ -n "$bat_dev" ]]; then
+        bat_time="$(upower -i "$bat_dev" 2>/dev/null | awk -F: '/time to (empty|full)/ { gsub(/^[ \t]+/, "", $2); print $2; exit }' || true)"
+      fi
+    fi
+
+    bat_line="Battery: ${cap}% (${bat_status}"
+    [[ -n "$bat_time" ]] && bat_line+=", ${bat_time} remaining"
+    bat_line+=")"
+
+    text="${bat_icon}  ${icon}"
+    tooltip="${tooltip}\\n${bat_line}"
+    if [[ "$bat_status" == "Discharging" && "$cap" -le 12 ]]; then
+      cls="critical"
+    fi
+  fi
+
+  if [[ "$compact" == "icon" ]]; then
+    text="$icon"
   fi
 
   printf '{"text":"%s","tooltip":"%s","class":"%s"}\n' "$text" "$tooltip" "$cls"
@@ -183,19 +232,19 @@ cmd_status() {
 cmd_menu() {
   local font_size="${1:-15}"
   local choice confirm
-  choice=$(printf "Auto (AC/Battery)\nLow Power\nHigh Power\nServer / AFK" | \
+  choice=$(printf "󰑐  Auto\n󰌪  Low\n󰗑  High\n󰒍  Server" | \
     "$HOME/.config/hypr/scripts/rofi-toggle.sh" -dmenu -theme "$HOME/.config/rofi/dropdown.rasi" -i -p "Power: " -l 4 \
-      -theme-str "window { width: 280px; } * { font: \"JetBrainsMono Nerd Font ${font_size}\"; }") || exit 0
+      -theme-str "window { width: 220px; } * { font: \"JetBrainsMono Nerd Font ${font_size}\"; }") || exit 0
 
   case "$choice" in
-    "Auto (AC/Battery)") set_mode "auto" ;;
-    "Low Power")         set_mode "low" ;;
-    "High Power")        set_mode "high" ;;
-    "Server / AFK")
+    *"Auto")   set_mode "auto" ;;
+    *"Low")    set_mode "low" ;;
+    *"High")   set_mode "high" ;;
+    *"Server")
       confirm=$(printf "Yes\nNo" | \
-        rofi -dmenu -theme "$HOME/.config/rofi/dropdown.rasi" -i -p "Enable Server/AFK? " -l 2 \
-          -mesg "Caps CPU, blocks sleep/lid-suspend, Wi-Fi power-save OFF, debounced DPMS off (Peek re-blanks in 25s)." \
-          -theme-str "window { width: 420px; } * { font: \"JetBrainsMono Nerd Font ${font_size}\"; }") || exit 0
+        rofi -dmenu -theme "$HOME/.config/rofi/dropdown.rasi" -i -p "Server mode? " -l 2 \
+          -mesg "Sleep blocked, Wi-Fi power-save off, DPMS off." \
+          -theme-str "window { width: 380px; } * { font: \"JetBrainsMono Nerd Font ${font_size}\"; }") || exit 0
       [[ "$confirm" == "Yes" ]] || exit 0
       set_mode "server"
       # Debounce so key-release doesn't immediately wake DPMS
@@ -207,8 +256,10 @@ cmd_menu() {
 }
 
 case "${1:-status}" in
-  status)    cmd_status ;;
-  reconcile) reconcile; pkill -RTMIN+8 waybar 2>/dev/null || true ;;
-  menu)      cmd_menu "${2:-}" ;;
-  set)       set_mode "${2:-auto}" ;;
+  status)         cmd_status 0 ;;
+  status-icon)    cmd_status icon ;;
+  status-compact) cmd_status 1 ;;
+  reconcile)      reconcile; pkill -RTMIN+8 waybar 2>/dev/null || true ;;
+  menu)           cmd_menu "${2:-}" ;;
+  set)            set_mode "${2:-auto}" ;;
 esac

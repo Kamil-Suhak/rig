@@ -36,12 +36,18 @@ case "$target" in
     "$HOME/.config/hypr/scripts/power-mode.sh" menu "$font_size"
     ;;
   wifi)
-    tmp_cfg="$(mktemp)"
-    sed "s|rofi -dmenu|rofi -dmenu -theme-str '${theme_override}'|" "$HOME/.config/networkmanager-dmenu/config.ini" > "$tmp_cfg"
-    networkmanager_dmenu --config "$tmp_cfg"
-    rm -f "$tmp_cfg"
+    "$HOME/.config/hypr/scripts/network-menu.sh" "$font_size"
     ;;
   bluetooth)
     bzmenu -l custom --launcher-command "rofi -dmenu -theme ~/.config/rofi/dropdown.rasi -i -p '󰂯  ' -theme-str '${theme_override}'"
+    ;;
+  audio)
+    if command -v wiremix >/dev/null 2>&1; then
+      exec ghostty --class=com.audio.tui -e wiremix
+    elif command -v pulsemixer >/dev/null 2>&1; then
+      exec ghostty --class=com.audio.tui -e pulsemixer
+    else
+      exec pavucontrol
+    fi
     ;;
 esac

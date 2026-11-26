@@ -1,9 +1,14 @@
 configuration {
-    modi: "drun,run";
+    modi: "drun,window,workset:~/code/projects/rig/configs/bin/workset-picker --rofi-mode,run";
     show-icons: true;
     font: "JetBrainsMono Nerd Font 15";
     click-to-exit: true;
     drun-display-format: "{name}";
+    window-format: "{w}  {c}  ·  {t}";
+    kb-element-next: "";
+    kb-element-prev: "";
+    kb-mode-next: "Tab";
+    kb-mode-previous: "ISO_Left_Tab";
 }
 
 * {
@@ -28,7 +33,24 @@ window {
 
 mainbox {
     spacing: 12px;
-    children: [inputbar, listview];
+    children: [inputbar, listview, mode-switcher];
+}
+
+mode-switcher {
+    spacing: 8px;
+}
+
+button {
+    padding: 6px 12px;
+    border-radius: 6px;
+    background-color: @bg-alt;
+    text-color: #5c6370;
+    horizontal-align: 0.5;
+}
+
+button selected {
+    background-color: @accent;
+    text-color: #282c34;
 }
 
 inputbar {
@@ -46,6 +68,7 @@ prompt {
 entry {
     placeholder: "Search...";
     placeholder-color: #5c6370;
+    text-color: #e6edf3;
 }
 
 listview {

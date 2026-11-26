@@ -713,17 +713,18 @@ class TestClipboardJwtAndDecide(unittest.TestCase):
             self.assertIn("Quick ask question", res_ask.stdout)
             self.assertNotIn('@[conversation:"Thesis"]', res_ask.stdout)
 
-            # Verify [NEW] option is prepended at index 0 and launches fresh session
-            fake_home = tpath / "fake-home"
-            rofi_dir = fake_home / ".config" / "hypr" / "scripts"
-            rofi_dir.mkdir(parents=True)
-            fake_rofi = rofi_dir / "rofi-toggle.sh"
-            fake_rofi.write_text("#!/usr/bin/env sh\ncat >/dev/null\nprintf '0\\n'\n", encoding="utf-8")
-            fake_rofi.chmod(0o755)
+            # Verify --rofi-mode prepends [NEW] and launches fresh session on selection
+            res_mode = run_cli(
+                BIN_DIR / "agy-picker",
+                ["--rofi-mode"],
+                env={"RIG_AGY_CLI_DIR": str(tpath)},
+            )
+            self.assertEqual(res_mode.returncode, 0, res_mode.stderr)
+            self.assertIn("[NEW] Start new session", res_mode.stdout)
             res_new = run_cli(
                 BIN_DIR / "agy-picker",
-                ["--dry-run"],
-                env={"HOME": str(fake_home), "RIG_AGY_CLI_DIR": str(tpath)},
+                ["--rofi-mode", "--dry-run", "[NEW] Start new session"],
+                env={"ROFI_INFO": f"__new__\t{tpath}\tmain", "RIG_AGY_CLI_DIR": str(tpath)},
             )
             self.assertEqual(res_new.returncode, 0, res_new.stderr)
             self.assertTrue(res_new.stdout.strip().endswith("-e agy"), res_new.stdout)
@@ -869,11 +870,11 @@ class TestWorkset(unittest.TestCase):
             )
             self.assertEqual(r_cur.stdout.strip(), "feat-ticket-99")
 
-            # Switch branch and verify 'open --what-if --code' warns without mutating current branch
+            # Switch branch and verify 'open --what-if' warns without mutating current branch
             subprocess.run(["git", "-C", str(repo), "switch", "-c", "other-branch"], check=True, capture_output=True)
             r_open = run_cli(
                 BIN_DIR / "workset",
-                ["open", "feat-ticket-99", "--code", "--what-if"],
+                ["open", "feat-ticket-99", "--what-if"],
                 cwd=repo,
                 env=env,
             )
@@ -1159,7 +1160,7 @@ class TestZshFunctionsViaBash(unittest.TestCase):
                 "RIG_TEST_RERUN_HISTORY_FILE": str(hist_file),
             }
 
-            # 1. Help checks, which, p, mkcd, gdiff, work-workspace vs --what-if
+            # 1. Help checks, p, mkcd, gdiff, work-workspace vs --what-if
             proj_parent_posix = proj_parent.as_posix()
             tpath_posix = tpath.as_posix()
             sln_sub_posix = sln_dir.as_posix()
@@ -1167,11 +1168,9 @@ class TestZshFunctionsViaBash(unittest.TestCase):
             script1 = "\n".join(
                 [
                     "set -e",
-                    "for fn in gdiff b nb lg wip unwip stashes groot mkcd p open out rerun which venv ask try; do",
+                    "for fn in gdiff b nb lg wip unwip stashes groot mkcd p open out rerun venv ask try; do",
                     '  "$fn" -h >/dev/null',
                     "done",
-                    "which profile -h",
-                    "which gdiff -h",
                     f'p --add "$(cygpath -u "{proj_parent_posix}" 2>/dev/null || echo "{proj_parent_posix}")"',
                     "p --list",
                     "p alpha",
@@ -1184,8 +1183,6 @@ class TestZshFunctionsViaBash(unittest.TestCase):
             )
             r1 = self._run_bash_snippet(script1, env=env)
             self.assertEqual(r1.returncode, 0, f"STDOUT:\n{r1.stdout}\nSTDERR:\n{r1.stderr}")
-            self.assertIn("[git]", r1.stdout)
-            self.assertIn("Source: gdiff is a function", r1.stdout)
             self.assertIn("alpha-app", r1.stdout)
 
             work_env = {**env, "RIG_WORKSPACE": "work"}

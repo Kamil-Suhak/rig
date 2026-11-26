@@ -2,6 +2,7 @@
   font-family: "JetBrainsMono Nerd Font", monospace;
   font-size: 14px;
   min-height: 0;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
 window#waybar.external * {
@@ -14,18 +15,34 @@ window#waybar {
   border: none;
 }
 
+tooltip {
+  background: rgba(33, 37, 43, 0.96);
+  border: 1px solid rgba(97, 175, 239, 0.35);
+  border-radius: 10px;
+}
+
+tooltip label {
+  color: #abb2bf;
+  padding: 6px 10px;
+}
+
 .modules-left,
 .modules-center,
 .modules-right {
-  background: rgba(40, 44, 52, 0.88);
-  border-radius: 10px;
-  border: 1px solid rgba(89, 89, 89, 0.67);
-  padding: 0 12px;
+  background: rgba(33, 37, 43, 0.90);
+  border-radius: 11px;
+  border: 1px solid rgba(97, 175, 239, 0.22);
+  padding: 0 10px;
+}
+
+.modules-center {
+  border-color: rgba(229, 192, 123, 0.28);
+  padding: 0 14px;
 }
 
 #window {
   padding: 0 10px;
-  color: #abb2bf;
+  color: #9da5b4;
 }
 
 #workspaces {
@@ -35,20 +52,20 @@ window#waybar {
 #workspaces button {
   padding: 0 8px;
   margin: 4px 2px;
-  border-radius: 6px;
+  border-radius: 7px;
   color: #5c6370;
   background: transparent;
 }
 
 #workspaces button.active {
-  color: #282c34;
+  color: #21252b;
   background: #61afef;
   font-weight: bold;
 }
 
 #workspaces button:hover {
   color: #abb2bf;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(97, 175, 239, 0.14);
 }
 
 #clock {
@@ -62,10 +79,39 @@ window#waybar {
 #network,
 #battery,
 #tray {
-  padding: 0 10px;
-  margin: 4px 2px;
-  border-radius: 6px;
-  background: rgba(33, 37, 43, 0.65);
+  font-size: 20px;
+  padding: 0 9px;
+  margin: 3px 5px;
+  border-radius: 7px;
+  background: transparent;
+  border: none;
+}
+
+#custom-power-mode {
+	margin-right: 1.5px;
+	padding-right: 0px;
+}
+
+#battery {
+	margin-left: 1.5px;
+	padding-left: 0px;
+}
+
+window#waybar.external #custom-power-mode,
+window#waybar.external #pulseaudio,
+window#waybar.external #bluetooth,
+window#waybar.external #network,
+window#waybar.external #battery,
+window#waybar.external #tray {
+  font-size: 18px;
+}
+
+#custom-power-mode:hover,
+label#custom-power-mode:hover,
+#pulseaudio:hover,
+#bluetooth:hover,
+#network:hover {
+  background: rgba(97, 175, 239, 0.14);
 }
 
 #custom-power-mode.low {
@@ -80,6 +126,10 @@ window#waybar {
   color: #c678dd;
 }
 
+#bluetooth {
+  color: #5c6370;
+}
+
 #bluetooth.connected {
   color: #61afef;
 }
@@ -90,6 +140,11 @@ window#waybar {
 
 #pulseaudio.muted {
   color: #5c6370;
+}
+
+#network.ethernet,
+#network.wifi {
+  color: #98c379;
 }
 
 #network.disconnected {
@@ -109,5 +164,5 @@ window#waybar {
 }
 
 #tray {
-  margin-right: 6px;
+  margin-right: 4px;
 }

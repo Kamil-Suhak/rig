@@ -134,91 +134,6 @@ unset _rig_group
 
 # --- Core System & Development Commands ---
 
-# @cmd: which — Locate command source, inspect profile directory ('which profile -h'), or run command help ('which <cmd> -h')
-which() {
-    local want_profile=0
-    local want_help=0
-    local target=""
-
-    while [ "$#" -gt 0 ]; do
-        case "$1" in
-            -h|--help|-Help)
-                want_help=1
-                shift
-                ;;
-            -p|--profile|-Profile)
-                want_profile=1
-                shift
-                ;;
-            -ph|-hp)
-                want_profile=1
-                want_help=1
-                shift
-                ;;
-            profile|\$profile)
-                want_profile=1
-                shift
-                ;;
-            *)
-                if [ -z "$target" ]; then
-                    target="$1"
-                fi
-                shift
-                ;;
-        esac
-    done
-
-    if [ "$want_profile" -eq 1 ]; then
-        if [ "$want_help" -eq 0 ]; then
-            printf '%s\n' "$RIG_ROOT/configs/zsh/init.zsh"
-            return 0
-        fi
-        "$RIG_PYTHON" "$RIG_ROOT/scripts/profile_groups.py" \
-            --root "$RIG_ROOT" \
-            --workspace "$RIG_WORKSPACE" \
-            --project-roots "$RIG_PROJECT_ROOTS" \
-            --profile-help
-        return $?
-    fi
-
-    if [ -z "$target" ]; then
-        cat <<'EOF'
-Usage:
-  which <command>       Show path or definition of <command>
-  which <command> -h    Show source location and invoke <command> --help
-  which profile         Show shared profile path
-  which profile -h      Display grouped directory of all profile & helper commands
-EOF
-        return 0
-    fi
-
-    if [ -n "${ZSH_VERSION:-}" ]; then
-        if ! whence -w "$target" >/dev/null 2>&1; then
-            printf "✖ which: Command '%s' not found.\n" "$target" >&2
-            return 1
-        fi
-        if [ "$want_help" -eq 0 ]; then
-            whence -v "$target"
-            return 0
-        fi
-        printf 'Source: '
-        whence -v "$target"
-    else
-        if ! type -t "$target" >/dev/null 2>&1; then
-            printf "✖ which: Command '%s' not found.\n" "$target" >&2
-            return 1
-        fi
-        if [ "$want_help" -eq 0 ]; then
-            type "$target" | head -n 1
-            return 0
-        fi
-        printf 'Source: '
-        type "$target" | head -n 1
-    fi
-
-    "$target" --help
-}
-
 # @cmd: venv — Activate an existing Python virtualenv (default: .venv) or create one first
 venv() {
     if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
@@ -383,12 +298,16 @@ if [ -n "${ZSH_VERSION:-}" ]; then
             }
             _rig_pty_ring_preexec() {
                 local LC_ALL=C
-                local i hex="" h=""
+                local i hex="" cwd_hex="" h=""
                 for (( i = 1; i <= ${#1}; i++ )); do
                     printf -v h '%02x' "'${1[i]}"
                     hex+="$h"
                 done
-                printf '\e]777;pty-ring-cmd;%s\a' "$hex"
+                for (( i = 1; i <= ${#PWD}; i++ )); do
+                    printf -v h '%02x' "'${PWD[i]}"
+                    cwd_hex+="$h"
+                done
+                printf '\e]777;pty-ring-cmd;%s\a\e]777;pty-ring-cwd;%s\a' "$hex" "$cwd_hex"
                 if [ "$_rig_has_ghostty_osc133" -eq 0 ]; then
                     printf '\e]133;C\a'
                 fi

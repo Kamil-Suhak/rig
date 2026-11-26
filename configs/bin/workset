@@ -713,7 +713,7 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Actions:\n"
             "  list [--archived]                  List active or archived worksets (default)\n"
-            "  new [<name>] [--url U] [--project P] [--status S] [--overview T]\n"
+            "  new [<name>] [--url U] [--from-gh N] [--project P] [--status S] [--overview T]\n"
             "                                     Create workset note in vault (defaults to current branch)\n"
             "  add [<name>] <file>...             Add files to current or named workset\n"
             "  add [<name>] --dirty               Append git modified/unpushed files to workset\n"
@@ -721,7 +721,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  sync [<name>]                      Replace workset file list with git modified/unpushed files\n"
             "  show [<name>] [--archived]         Print workset note\n"
             "  edit [<name>]                      Open workset note in editor\n"
-            "  open [<name>] [--code|--vs]        Open workset (splits VS/.NET & VS Code by default)\n"
+            "  open [<name>]                      Open workset in VS Code (folders + -g files)\n"
             "  gh [<name>]                        Open workset issue_url (or repo remote) in Brave\n"
             "  archive [<name>]                   Move active workset to archived\n"
             "  restore [<name>]                   Restore archived workset to active\n"
@@ -732,11 +732,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-f", "--files", nargs="+", dest="files_flag", help="Files to add/remove (on 'add'/'rm')")
     parser.add_argument("--dirty", action="store_true", help="Add git modified/unpushed files ('add' only)")
     parser.add_argument("--url", help="Issue URL for 'new'")
+    parser.add_argument("--from-gh", help="GitHub issue number/URL to pre-populate issue_url and overview for 'new'")
     parser.add_argument("--project", help="Parent [[Project]] wikilink for 'new'")
     parser.add_argument("--status", help="Initial status for 'new'")
     parser.add_argument("--overview", help="Initial Overview & WIP text for 'new'")
-    parser.add_argument("--code", action="store_true", help="Open all workset files in VS Code ('open' only)")
-    parser.add_argument("--vs", action="store_true", help="Force Visual Studio ('open' only)")
     parser.add_argument("--archived", action="store_true", help="Target archived worksets (list/show/delete)")
     parser.add_argument("--what-if", action="store_true", help="Preview mutating or launch actions without executing")
     parser.add_argument("--current-name", action="store_true", help=argparse.SUPPRESS)
@@ -800,11 +799,8 @@ def main(argv: list[str] | None = None) -> int:
         print(ctext(f"Unknown action '{tokens[0]}'. Expected one of: {', '.join(VALID_ACTIONS)}", "red"), file=sys.stderr)
         return 2
 
-    if args.code and args.vs:
-        print(ctext("Choose either --code or --vs.", "red"), file=sys.stderr)
-        return 2
-    if (args.code or args.vs) and action != "open":
-        print(ctext("--code and --vs are only valid with 'open'.", "red"), file=sys.stderr)
+    if args.from_gh and action != "new":
+        print(ctext("--from-gh is only valid with 'new'.", "red"), file=sys.stderr)
         return 2
     if args.files_flag and action not in ("add", "rm"):
         print(ctext("--files is only valid with 'add' or 'rm'.", "red"), file=sys.stderr)
@@ -853,6 +849,32 @@ def main(argv: list[str] | None = None) -> int:
 
             status = args.status or str(cfg.get("default_status") or "wip")
             issue_url = (args.url or "").strip()
+            overview_text = (args.overview or "").strip()
+
+            if args.from_gh:
+                gh_bin = shutil.which("gh")
+                if not gh_bin:
+                    raise FileNotFoundError("✖ workset: 'gh' CLI not found in PATH.")
+                gh_res = subprocess.run(
+                    [gh_bin, "issue", "view", str(args.from_gh), "--json", "url,title,body"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if gh_res.returncode != 0:
+                    err_msg = gh_res.stderr.strip() or f"gh issue view failed (exit {gh_res.returncode})"
+                    raise ValueError(err_msg)
+                try:
+                    gh_data = json.loads(gh_res.stdout)
+                except ValueError as exc:
+                    raise ValueError(f"Failed to parse 'gh issue view' output: {exc}") from exc
+                if not issue_url and gh_data.get("url"):
+                    issue_url = str(gh_data["url"]).strip()
+                if not overview_text:
+                    gh_title = str(gh_data.get("title") or "").strip()
+                    gh_body = str(gh_data.get("body") or "").strip()
+                    parts = [p for p in (f"**{gh_title}**" if gh_title else "", gh_body) if p]
+                    overview_text = "\n\n".join(parts)
 
             if args.what_if:
                 print(ctext(f"WHAT-IF: Create workset '{name}' at {active_note}", "cyan"))
@@ -870,7 +892,7 @@ def main(argv: list[str] | None = None) -> int:
                     branch=ctx[1] if ctx else None,
                     repositories=[],
                     files=[],
-                    overview=(args.overview or ""),
+                    overview=overview_text,
                 )
                 staging.write_text(content, encoding="utf-8", newline="\n")
                 os.replace(staging, active_note)

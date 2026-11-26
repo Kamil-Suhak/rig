@@ -51,7 +51,7 @@ def _parse_workspace_dir(raw_uris: str, fallback: Path) -> Path:
     return fallback
 
 
-def load_conversations(cli_dir: Path, *, limit: int = 50) -> list[dict[str, str]]:
+def load_conversations(cli_dir: Path, *, limit: int = 50, source: str = "main") -> list[dict[str, str]]:
     """Load top-level agy CLI conversations from conversation_summaries.db."""
     db_path = cli_dir / "conversation_summaries.db"
     if not db_path.is_file():
@@ -79,11 +79,14 @@ def load_conversations(cli_dir: Path, *, limit: int = 50) -> list[dict[str, str]
             cwd = _parse_workspace_dir(str(raw_uris), home)
             ws_name = "~" if cwd == home else cwd.name
             short_date = str(mtime)[:16].replace("T", " ")
+            prefix = "[ask] " if source == "ask" else ""
             rows.append(
                 {
                     "id": str(cid),
                     "cwd": str(cwd),
-                    "display": f"{label}  [{ws_name}]  ({short_date})",
+                    "source": source,
+                    "mtime": str(mtime),
+                    "display": f"{prefix}{label}  [{ws_name}]  ({short_date})",
                 }
             )
     finally:
@@ -92,26 +95,66 @@ def load_conversations(cli_dir: Path, *, limit: int = 50) -> list[dict[str, str]
     return rows
 
 
+def _launch_session(cid: str, cwd: str, source: str, ask_home: Path, *, dry_run: bool = False) -> int:
+    if cid == "__new__":
+        agy_tail = ["agy"]
+    else:
+        agy_tail = ["agy", "--conversation", cid]
+
+    if source == "ask":
+        cmd = ["ghostty", f"--working-directory={cwd}", "-e", "env", f"HOME={ask_home}", *agy_tail]
+    else:
+        cmd = ["ghostty", f"--working-directory={cwd}", "-e", *agy_tail]
+
+    if dry_run:
+        print(" ".join(cmd))
+        return 0
+
+    subprocess.Popen(
+        cmd,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="agy-picker", description="Pick an agy CLI conversation via rofi and launch it in Ghostty.")
-    parser.add_argument("--ask", action="store_true", help="Pick from isolated ask-home rolling sessions instead of main agy CLI history")
+    parser = argparse.ArgumentParser(prog="agy-picker", description="Pick an agy CLI conversation via rofi (tabbed agy | ask modes) and launch it in Ghostty.")
+    parser.add_argument("--ask", action="store_true", help="Target isolated ask-home rolling sessions")
+    parser.add_argument("--rofi-mode", action="store_true", help="Run as a native Rofi script mode")
     parser.add_argument("--list", action="store_true", help="Print formatted conversation entries and exit")
     parser.add_argument("--dry-run", action="store_true", help="Print the selected launch command instead of executing")
     parser.add_argument("--limit", type=int, default=50, help="Maximum conversations to show (default: 50)")
+    parser.add_argument("selection", nargs="?", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
     ask_home = Path(os.environ.get("RIG_ASK_HOME") or (Path.home() / ".local" / "share" / "ask-home")).expanduser()
-    if args.ask:
-        cli_dir = ask_home / ".gemini" / "antigravity-cli"
-        prompt_label = "ask> "
-        empty_msg = "No ask sessions found."
-    else:
-        cli_dir = Path(os.environ.get("RIG_AGY_CLI_DIR") or (Path.home() / ".gemini" / "antigravity-cli")).expanduser()
-        prompt_label = "agy> "
-        empty_msg = "No Antigravity CLI conversations found."
+    ask_cli_dir = ask_home / ".gemini" / "antigravity-cli"
+    main_cli_dir = Path(os.environ.get("RIG_AGY_CLI_DIR") or (Path.home() / ".gemini" / "antigravity-cli")).expanduser()
 
-    items = load_conversations(cli_dir, limit=args.limit)
+    source = "ask" if args.ask else "main"
+    cli_dir = ask_cli_dir if args.ask else main_cli_dir
+    prompt_label = "ask" if args.ask else "agy"
+    empty_msg = "No ask sessions found." if args.ask else "No Antigravity CLI conversations found."
+
+    if args.rofi_mode:
+        if args.selection is not None:
+            info = os.environ.get("ROFI_INFO", "").strip()
+            parts = info.split("\t")
+            if len(parts) >= 3:
+                return _launch_session(parts[0], parts[1], parts[2], ask_home, dry_run=args.dry_run)
+            return 0
+        print(f"\x00prompt\x1f{prompt_label}> ")
+        print(f"[NEW] Start new session\x00info\x1f__new__\t{Path.home()}\t{source}")
+        for item in load_conversations(cli_dir, limit=args.limit, source=source):
+            display = item["display"].removeprefix("[ask] ")
+            print(f"{display}\x00info\x1f{item['id']}\t{item['cwd']}\t{source}")
+        return 0
+
     if args.list:
+        items = load_conversations(cli_dir, limit=args.limit, source=source)
         if not items:
             print(empty_msg, file=sys.stderr)
             return 1
@@ -119,49 +162,30 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{item['id']}\t{item['cwd']}\t{item['display']}")
         return 0
 
-    menu_items = [
-        {"id": "__new__", "cwd": str(Path.home()), "display": "[NEW] Start new session"},
-        *items,
-    ]
-
     toggle_script = Path.home() / ".config" / "hypr" / "scripts" / "rofi-toggle.sh"
     rofi = str(toggle_script) if toggle_script.is_file() else shutil.which("rofi")
     if not rofi:
         print("✖ agy-picker: 'rofi' not found in PATH.", file=sys.stderr)
         return 1
 
-    menu_input = "\n".join(item["display"] for item in menu_items)
-    res = subprocess.run(
-        [rofi, "-dmenu", "-format", "i", "-i", "-p", prompt_label, "-theme-str", "window { width: 820px; }"],
-        input=menu_input,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if res.returncode != 0 or not res.stdout.strip():
-        return 0
-
-    try:
-        idx = int(res.stdout.strip())
-        chosen = menu_items[idx]
-    except (ValueError, IndexError):
-        return 1
-
-    if chosen["id"] == "__new__":
-        agy_tail = ["agy"]
-    else:
-        agy_tail = ["agy", "--conversation", chosen["id"]]
-
-    if args.ask:
-        cmd = ["ghostty", f"--working-directory={chosen['cwd']}", "-e", "env", f"HOME={ask_home}", *agy_tail]
-    else:
-        cmd = ["ghostty", f"--working-directory={chosen['cwd']}", "-e", *agy_tail]
+    self_path = str(Path(__file__).resolve())
+    initial_mode = "ask" if args.ask else "agy"
+    modi = f"agy:{self_path} --rofi-mode,ask:{self_path} --rofi-mode --ask"
+    cmd = [
+        rofi,
+        "-show",
+        initial_mode,
+        "-modi",
+        modi,
+        "-i",
+        "-theme-str",
+        "window { width: 820px; }",
+    ]
     if args.dry_run:
         print(" ".join(cmd))
         return 0
 
-    subprocess.Popen(cmd, start_new_session=True)
-    return 0
+    return subprocess.run(cmd, check=False).returncode
 
 
 if __name__ == "__main__":

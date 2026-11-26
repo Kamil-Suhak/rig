@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+"""Rofi workset switcher (Enter: workset open, Alt+G: workset gh)."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+def _resolve_worksets_dir() -> Path:
+    override = os.environ.get("RIG_NOTES_DIR", "").strip()
+    if override:
+        base = Path(override).expanduser()
+    else:
+        ws = os.environ.get("RIG_WORKSPACE", "personal").strip().lower()
+        chain = [c.strip().lower() for c in os.environ.get("RIG_WORKSPACE_CHAIN", "").splitlines() if c.strip()]
+        base = Path.home() / ("work-notes" if ws in ("rbc", "work") or "work" in chain or "rbc" in chain else "notes")
+    return base / "Worksets"
+
+
+def load_worksets(worksets_dir: Path) -> list[dict[str, str]]:
+    if not worksets_dir.is_dir():
+        return []
+    entries: list[dict[str, str]] = []
+    for md in sorted(worksets_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True):
+        name = md.stem
+        url = ""
+        try:
+            text = md.read_text(encoding="utf-8", errors="replace")
+            if text.startswith("---"):
+                end = text.find("\n---", 3)
+                if end != -1:
+                    for line in text[3:end].splitlines():
+                        if line.strip().startswith("url:"):
+                            url = line.split(":", 1)[1].strip().strip('"').strip("'")
+                            break
+        except OSError:
+            pass
+        suffix = f"  ({url})" if url else ""
+        entries.append({"name": name, "display": f"{name}{suffix}"})
+    return entries
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="workset-picker", description="Pick a workset via rofi (Enter: open, Alt+G: GitHub).")
+    parser.add_argument("--rofi-mode", action="store_true", help="Run as a native Rofi script mode")
+    parser.add_argument("--list", action="store_true", help="Print available worksets and exit")
+    parser.add_argument("--dry-run", action="store_true", help="Print the selected command instead of executing")
+    parser.add_argument("selection", nargs="?", help=argparse.SUPPRESS)
+    args = parser.parse_args(argv)
+
+    workset_bin = str(Path(__file__).resolve().parent / "workset")
+
+    if args.rofi_mode:
+        if args.selection is not None:
+            name = os.environ.get("ROFI_INFO", "").strip()
+            if name:
+                cmd = [sys.executable, workset_bin, "open", name]
+                if args.dry_run:
+                    print(" ".join(cmd))
+                    return 0
+                subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            return 0
+        print("\x00prompt\x1fworkset> ")
+        for item in load_worksets(_resolve_worksets_dir()):
+            print(f"{item['display']}\x00info\x1f{item['name']}")
+        return 0
+
+    items = load_worksets(_resolve_worksets_dir())
+    if args.list:
+        if not items:
+            print("No worksets found.", file=sys.stderr)
+            return 1
+        for item in items:
+            print(f"{item['name']}\t{item['display']}")
+        return 0
+
+    if not items:
+        print("No worksets found.", file=sys.stderr)
+        return 1
+
+    toggle_script = Path.home() / ".config" / "hypr" / "scripts" / "rofi-toggle.sh"
+    rofi = str(toggle_script) if toggle_script.is_file() else shutil.which("rofi")
+    if not rofi:
+        print("✖ workset-picker: 'rofi' not found in PATH.", file=sys.stderr)
+        return 1
+
+    menu_input = "\n".join(item["display"] for item in items)
+    res = subprocess.run(
+        [
+            rofi,
+            "-dmenu",
+            "-format",
+            "i",
+            "-i",
+            "-p",
+            "workset> ",
+            "-kb-custom-1",
+            "Alt+g",
+            "-mesg",
+            "Enter: open  ·  Alt+G: GitHub",
+            "-theme-str",
+            "window { width: 720px; }",
+        ],
+        input=menu_input,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if res.returncode not in (0, 10) or not res.stdout.strip():
+        return 0
+
+    try:
+        idx = int(res.stdout.strip())
+        chosen = items[idx]
+    except (ValueError, IndexError):
+        return 1
+
+    workset_bin = str(Path(__file__).resolve().parent / "workset")
+    subcmd = "gh" if res.returncode == 10 else "open"
+    cmd = [sys.executable, workset_bin, subcmd, chosen["name"]]
+    if args.dry_run:
+        print(" ".join(cmd))
+        return 0
+
+    subprocess.Popen(cmd, start_new_session=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

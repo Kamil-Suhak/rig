@@ -20,8 +20,8 @@ hl.bind(mainMod .. " + J", hl.dsp.layout("togglesplit")) -- Toggle split orienta
 
 -- Apps & pickers
 hl.bind(mainMod .. " + A", hl.dsp.exec_cmd("ghostty -e agy -c")) -- Resume latest Antigravity CLI session
-hl.bind(mainMod .. " + CTRL + A", hl.dsp.exec_cmd("~/code/projects/rig/configs/bin/agy-picker")) -- Pick Antigravity CLI session
-hl.bind(mainMod .. " + SHIFT + A", hl.dsp.exec_cmd("~/code/projects/rig/configs/bin/agy-picker --ask")) -- Pick rolling ask session
+hl.bind(mainMod .. " + CTRL + A", hl.dsp.exec_cmd("~/code/projects/rig/configs/bin/agy-picker")) -- Pick Antigravity CLI / ask session
+hl.bind(mainMod .. " + CTRL + W", hl.dsp.exec_cmd("~/code/projects/rig/configs/bin/workset-picker")) -- Pick workset (Enter: open, Alt+G: GitHub)
 hl.bind(mainMod .. " + B", hl.dsp.exec_cmd("brave")) -- Open Brave browser
 hl.bind(mainMod .. " + C", hl.dsp.exec_cmd("code")) -- Open VS Code (default profile)
 hl.bind(mainMod .. " + O", hl.dsp.exec_cmd("obsidian")) -- Open Obsidian
@@ -41,6 +41,8 @@ hl.bind(mainMod .. " + CTRL + SHIFT + S", hl.dsp.exec_cmd("mkdir -p ~/Pictures/S
 hl.window_rule({ name = "float-satty", float = true, match = { class = "^(com\\.gabm\\.satty)$" } })
 hl.bind(mainMod .. " + SHIFT + V", hl.dsp.exec_cmd("ghostty --class=com.clipse.float -e clipse")) -- Clipboard history (Clipse)
 hl.window_rule({ name = "float-clipse", float = true, match = { class = "^(com\\.clipse\\.float)$" } })
+hl.window_rule({ name = "float-pavucontrol", float = true, size = "780 520", center = true, match = { class = "^(org\\.pulseaudio\\.pavucontrol|pavucontrol)$" } })
+hl.window_rule({ name = "float-audio-tui", float = true, size = "780 500", center = true, match = { class = "^(com\\.audio\\.tui)$" } })
 
 -- Move focus with mainMod + arrow keys
 hl.bind(mainMod .. " + left",  hl.dsp.focus({ direction = "left" })) -- Focus window left

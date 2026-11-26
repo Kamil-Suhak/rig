@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use vte::{Params, Parser, Perform};
 
 const MAX_ENTRIES: usize = 20;
@@ -45,6 +46,12 @@ enum Phase {
 struct RenderedEntry {
     command: String,
     exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    started_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duration_ms: Option<u64>,
     output: Vec<String>,
 }
 
@@ -52,6 +59,9 @@ struct RingState {
     phase: Phase,
     in_alt_screen: bool,
     pending_cmd: Option<String>,
+    pending_cwd: Option<String>,
+    cmd_started_instant: Option<Instant>,
+    cmd_started_epoch: Option<u64>,
     input_bytes: Vec<u8>,
     output_bytes: Vec<u8>,
     cols: u16,
@@ -65,6 +75,9 @@ impl RingState {
             phase: Phase::Idle,
             in_alt_screen: false,
             pending_cmd: None,
+            pending_cwd: None,
+            cmd_started_instant: None,
+            cmd_started_epoch: None,
             input_bytes: Vec::new(),
             output_bytes: Vec::new(),
             cols,
@@ -110,15 +123,26 @@ impl Perform for RingState {
     }
 
     fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
-        if params.first().copied() == Some(b"777")
-            && params.get(1).copied() == Some(b"pty-ring-cmd")
-        {
-            if let Some(hex) = params.get(2) {
-                if let Some(decoded) = decode_hex(hex) {
-                    self.pending_cmd = Some(decoded);
+        if params.first().copied() == Some(b"777") {
+            match params.get(1).copied() {
+                Some(b"pty-ring-cmd") => {
+                    if let Some(hex) = params.get(2) {
+                        if let Some(decoded) = decode_hex(hex) {
+                            self.pending_cmd = Some(decoded);
+                        }
+                    }
+                    return;
                 }
+                Some(b"pty-ring-cwd") => {
+                    if let Some(hex) = params.get(2) {
+                        if let Some(decoded) = decode_hex(hex) {
+                            self.pending_cwd = Some(decoded);
+                        }
+                    }
+                    return;
+                }
+                _ => {}
             }
-            return;
         }
 
         if params.first().copied() != Some(b"133") {
@@ -131,6 +155,9 @@ impl Perform for RingState {
             b"A" => {
                 self.phase = Phase::Idle;
                 self.pending_cmd = None;
+                self.pending_cwd = None;
+                self.cmd_started_instant = None;
+                self.cmd_started_epoch = None;
                 self.input_bytes.clear();
             }
             b"B" => {
@@ -140,6 +167,11 @@ impl Perform for RingState {
             b"C" => {
                 self.phase = Phase::Output;
                 self.output_bytes.clear();
+                self.cmd_started_instant = Some(Instant::now());
+                self.cmd_started_epoch = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .ok()
+                    .map(|d| d.as_secs());
             }
             b"D" => {
                 if self.phase == Phase::Output {
@@ -156,6 +188,12 @@ impl Perform for RingState {
                                 .trim()
                                 .to_string()
                         });
+                    let cwd = self.pending_cwd.take();
+                    let started_at = self.cmd_started_epoch.take();
+                    let duration_ms = self
+                        .cmd_started_instant
+                        .take()
+                        .map(|t| t.elapsed().as_millis() as u64);
                     let is_out_cmd = cmd.split_whitespace().next() == Some("out");
                     if !is_out_cmd && (!cmd.is_empty() || !self.output_bytes.is_empty()) {
                         let rendered_out = render_vt_lines(&self.output_bytes, self.rows, self.cols);
@@ -166,6 +204,9 @@ impl Perform for RingState {
                         self.entries.push_back(RenderedEntry {
                             command: cmd,
                             exit_code,
+                            cwd,
+                            started_at,
+                            duration_ms,
                             output: rendered_out,
                         });
                     } else {
@@ -174,6 +215,9 @@ impl Perform for RingState {
                 }
                 self.phase = Phase::Idle;
                 self.pending_cmd = None;
+                self.pending_cwd = None;
+                self.cmd_started_instant = None;
+                self.cmd_started_epoch = None;
                 self.input_bytes.clear();
             }
             _ => {}

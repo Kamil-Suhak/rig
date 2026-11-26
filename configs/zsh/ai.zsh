@@ -37,12 +37,12 @@ EOF
     "${RIG_PYTHON:-python3}" "$RIG_ROOT/configs/bin/ask-helper" out "$@"
 }
 
-# @cmd: ask — Ask AI CLI (agy or copilot via RIG_ASK_ENGINE) in isolated ask-home (--ctx, --high, --local, -r, -c)
+# @cmd: ask — Ask AI CLI (agy or copilot via RIG_ASK_ENGINE) in isolated ask-home (--ctx, --high, --local, --vault-cleanup, -r, -c)
 ask() {
     case "${1:-}" in
         -h|--help|-Help)
             cat <<EOF
-Usage: ask [--ctx [<sel>]] [--high] [--local] [-r|--reply] [-c|--continue] [--keep-history] <question>
+Usage: ask [--ctx [<sel>]] [--high] [--local] [--vault-cleanup] [-r|--reply] [-c|--continue] [--keep-history] <question>
 
 Query the active AI CLI (${RIG_ASK_ENGINE:-agy}) in an isolated ask-home with streamed response.
 Accepts piped input (e.g. 'out | ask "why did this fail?"').
@@ -50,6 +50,7 @@ Options:
   --ctx              Include terminal command/output slice (default @1; pass 2, @2, or 3..2 before question)
   --high             Use high-reasoning model (agy only)
   --local            Run in current working directory and inject active workset context
+  --vault-cleanup    Run '/vault-cleanup' in the active workspace's Obsidian vault directory
   -r, --reply        Send a follow-up prompt to the most recent ask conversation (inherits its cwd)
   -c, --continue     Open interactive session on the most recent ask conversation (inherits its cwd)
   --keep-history     Save conversation in main CLI state instead of ask-home (agy only)

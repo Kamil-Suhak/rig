@@ -368,11 +368,19 @@ if [ -n "${ZSH_VERSION:-}" ]; then
             . "$RIG_ROOT/configs/zsh/keybinds.zsh"
         fi
 
+        _rig_has_ghostty_osc133=0
         if [ -n "${GHOSTTY_RESOURCES_DIR:-}" ] && [ -f "$GHOSTTY_RESOURCES_DIR/shell-integration/zsh/ghostty-integration" ]; then
             . "$GHOSTTY_RESOURCES_DIR/shell-integration/zsh/ghostty-integration"
+            _rig_has_ghostty_osc133=1
         fi
 
         if [ -n "${PTY_RING_SOCK:-}" ]; then
+            _rig_pty_ring_precmd() {
+                local rc=$?
+                if [ "$_rig_has_ghostty_osc133" -eq 0 ]; then
+                    printf '\e]133;D;%s\a\e]133;A\a' "$rc"
+                fi
+            }
             _rig_pty_ring_preexec() {
                 local LC_ALL=C
                 local i hex="" h=""
@@ -381,7 +389,15 @@ if [ -n "${ZSH_VERSION:-}" ]; then
                     hex+="$h"
                 done
                 printf '\e]777;pty-ring-cmd;%s\a' "$hex"
+                if [ "$_rig_has_ghostty_osc133" -eq 0 ]; then
+                    printf '\e]133;C\a'
+                fi
             }
+            if [ -n "${precmd_functions+x}" ]; then
+                precmd_functions=(_rig_pty_ring_precmd "${precmd_functions[@]}")
+            else
+                precmd_functions=(_rig_pty_ring_precmd)
+            fi
             if [ -n "${preexec_functions+x}" ]; then
                 preexec_functions+=(_rig_pty_ring_preexec)
             else

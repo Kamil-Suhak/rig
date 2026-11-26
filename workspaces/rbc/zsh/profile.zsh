@@ -1,5 +1,7 @@
 # RBC workspace Zsh profile overrides (inherits from work)
 
+export PATH="/mnt/c/Users/KamilSuhak/AppData/Local/Programs/Microsoft VS Code/bin:$PATH"
+
 # @cmd: optify-issues — List or interactively pick assigned OptifyRequirements project issues
 optify-issues() {
     local pick=0
